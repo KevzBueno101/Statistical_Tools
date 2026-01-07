@@ -4,8 +4,10 @@ from scipy.stats import f_oneway
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import numpy as np
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 from datetime import datetime
 import pandas as pd
 
@@ -20,7 +22,7 @@ class ANOVAAnalyzer(ctk.CTk):
         
         # Configure main window
         self.title("One-Way ANOVA Analyzer")
-        self.geometry("900x750")  # Increased height to accommodate new fields
+        self.geometry("900x750")
         
         # Store group input widgets
         self.group_widgets = []
@@ -212,7 +214,6 @@ class ANOVAAnalyzer(ctk.CTk):
         
     def import_excel(self):
         """Import group data from an Excel file"""
-        # Open file dialog
         filepath = filedialog.askopenfilename(
             title="Select Excel File",
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
@@ -222,40 +223,29 @@ class ANOVAAnalyzer(ctk.CTk):
             return
         
         try:
-            # Read Excel file using pandas
             df = pd.read_excel(filepath)
-            
-            # Get number of columns with data
             num_columns = len(df.columns)
             
             if num_columns == 0:
                 messagebox.showerror("Error", "The Excel file has no data columns!")
                 return
             
-            # Clear existing entries first
             self.clear_all()
-            
-            # Determine how many groups we need
             current_groups = len(self.group_widgets)
             
-            # Add more groups if Excel has more columns
             if num_columns > current_groups:
                 for _ in range(num_columns - current_groups):
                     self.add_group()
             
-            # Process each column
             successfully_imported = 0
             
             for col_idx, column_name in enumerate(df.columns):
                 if col_idx >= len(self.group_widgets):
                     break
                 
-                # Get column data and remove NaN values
                 column_data = df[column_name].dropna()
                 
-                # Validate that all values are numeric
                 if not pd.api.types.is_numeric_dtype(column_data):
-                    # Try to convert to numeric
                     try:
                         column_data = pd.to_numeric(column_data, errors='coerce').dropna()
                     except:
@@ -265,7 +255,6 @@ class ANOVAAnalyzer(ctk.CTk):
                         )
                         continue
                 
-                # Check if column has data after cleaning
                 if len(column_data) == 0:
                     messagebox.showwarning(
                         "Warning", 
@@ -273,19 +262,12 @@ class ANOVAAnalyzer(ctk.CTk):
                     )
                     continue
                 
-                # Convert to comma-separated string
                 values_str = ', '.join([str(val) for val in column_data.values])
-                
-                # Get the entry widget for this group
                 _, _, entry, _ = self.group_widgets[col_idx]
-                
-                # Clear and insert new values
                 entry.delete(0, 'end')
                 entry.insert(0, values_str)
-                
                 successfully_imported += 1
             
-            # Show success message
             if successfully_imported > 0:
                 messagebox.showinfo(
                     "Success", 
@@ -298,9 +280,6 @@ class ANOVAAnalyzer(ctk.CTk):
                     "No valid numeric data was found in the Excel file."
                 )
         
-        except FileNotFoundError:
-            messagebox.showerror("Error", "Excel file not found!")
-        
         except Exception as e:
             messagebox.showerror(
                 "Error", 
@@ -312,11 +291,9 @@ class ANOVAAnalyzer(ctk.CTk):
         """Add a new group input field"""
         group_num = len(self.group_widgets) + 1
         
-        # Frame for single group
         group_frame = ctk.CTkFrame(self.groups_frame)
         group_frame.pack(fill="x", pady=5)
         
-        # Label
         label = ctk.CTkLabel(
             group_frame, 
             text=f"Group {group_num}:", 
@@ -325,11 +302,9 @@ class ANOVAAnalyzer(ctk.CTk):
         )
         label.pack(side="left", padx=(5, 5))
         
-        # Entry field
         entry = ctk.CTkEntry(group_frame, placeholder_text="e.g., 12, 15, 14, 17")
         entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
-        # Remove button
         remove_btn = ctk.CTkButton(
             group_frame, 
             text="✖", 
@@ -340,7 +315,6 @@ class ANOVAAnalyzer(ctk.CTk):
         )
         remove_btn.pack(side="right", padx=5)
         
-        # Store references
         self.group_widgets.append((group_frame, label, entry, remove_btn))
     
     def remove_group(self, group_frame, label, entry, remove_btn):
@@ -349,16 +323,13 @@ class ANOVAAnalyzer(ctk.CTk):
             messagebox.showwarning("Warning", "You must have at least 2 groups for ANOVA!")
             return
         
-        # Remove from GUI
         group_frame.destroy()
         
-        # Remove from list
         self.group_widgets = [
             widget for widget in self.group_widgets 
             if widget[0] != group_frame
         ]
         
-        # Renumber remaining groups
         for i, (frame, lbl, ent, btn) in enumerate(self.group_widgets, 1):
             lbl.configure(text=f"Group {i}:")
     
@@ -372,7 +343,6 @@ class ANOVAAnalyzer(ctk.CTk):
         self.clear_all()
         self.results_text.delete("1.0", "end")
         self.anova_results = None
-        # Don't clear report info fields on reset
     
     def validate_and_parse_inputs(self):
         """Validate and parse all group inputs"""
@@ -391,7 +361,6 @@ class ANOVAAnalyzer(ctk.CTk):
                 return None
             
             try:
-                # Parse comma-separated values
                 values = [float(x.strip()) for x in text.split(',')]
                 
                 if len(values) < 2:
@@ -409,7 +378,6 @@ class ANOVAAnalyzer(ctk.CTk):
     
     def run_anova(self):
         """Perform One-Way ANOVA analysis"""
-        # Validate and parse inputs
         result = self.validate_and_parse_inputs()
         if result is None:
             return
@@ -417,42 +385,34 @@ class ANOVAAnalyzer(ctk.CTk):
         groups, group_names = result
         
         try:
-            # Perform ANOVA using scipy
             F_statistic, p_value = f_oneway(*groups)
             
-            # Manual ANOVA calculations for detailed output
             all_data = np.concatenate(groups)
             grand_mean = np.mean(all_data)
             k = len(groups)
             N = len(all_data)
             
-            # Sum of Squares
             SS_between = sum(len(g) * (np.mean(g) - grand_mean)**2 for g in groups)
             SS_total = np.sum((all_data - grand_mean)**2)
             SS_within = SS_total - SS_between
             
-            # Degrees of Freedom
             df_between = k - 1
             df_within = N - k
             
-            # Mean Squares
             MS_between = SS_between / df_between
             MS_within = SS_within / df_within
             
-            # Alpha level
-            alpha = 0.05
+            eta_squared = SS_between / SS_total
             
-            # Decision
+            alpha = 0.05
             decision = "Reject H₀" if p_value < alpha else "Fail to Reject H₀"
             is_significant = p_value < alpha
             
-            # Conclusion
             if is_significant:
                 conclusion = "There is a statistically significant difference among the group means."
             else:
                 conclusion = "There is no statistically significant difference among the group means."
             
-            # Store results for DOCX export
             self.anova_results = {
                 'groups': groups,
                 'group_names': group_names,
@@ -469,13 +429,13 @@ class ANOVAAnalyzer(ctk.CTk):
                 'df_within': df_within,
                 'MS_between': MS_between,
                 'MS_within': MS_within,
+                'eta_squared': eta_squared,
                 'all_data': all_data,
                 'report_title': self.report_title_entry.get().strip() or "ANOVA ANALYSIS RESULTS",
                 'report_subtitle': self.report_subtitle_entry.get().strip(),
                 'researcher_name': self.researcher_name_entry.get().strip()
             }
             
-            # Display results
             self.display_results()
             
         except Exception as e:
@@ -490,7 +450,6 @@ class ANOVAAnalyzer(ctk.CTk):
         
         r = self.anova_results
         
-        # Build output text
         output = "=" * 50 + "\n"
         output += f"{r['report_title']}\n"
         if r['report_subtitle']:
@@ -499,7 +458,6 @@ class ANOVAAnalyzer(ctk.CTk):
             output += f"by: {r['researcher_name']}\n"
         output += "=" * 50 + "\n\n"
         
-        # Descriptive Statistics
         output += "DESCRIPTIVE STATISTICS\n"
         output += "-" * 50 + "\n"
         for i, (name, group) in enumerate(zip(r['group_names'], r['groups'])):
@@ -508,7 +466,6 @@ class ANOVAAnalyzer(ctk.CTk):
             output += f"  Mean = {np.mean(group):.2f}\n"
             output += f"  SD = {np.std(group, ddof=1):.4f}\n\n"
         
-        # ANOVA Table
         output += "\nANOVA TABLE\n"
         output += "-" * 50 + "\n"
         output += f"{'Source':<15} {'SS':<12} {'df':<6} {'MS':<12} {'F':<10}\n"
@@ -516,12 +473,12 @@ class ANOVAAnalyzer(ctk.CTk):
         output += f"{'Within':<15} {r['SS_within']:<12.4f} {r['df_within']:<6} {r['MS_within']:<12.4f}\n"
         output += f"{'Total':<15} {r['SS_total']:<12.4f} {r['df_between'] + r['df_within']:<6}\n"
         
-        # Test Results
         output += "\n" + "=" * 50 + "\n"
         output += "TEST RESULTS\n"
         output += "=" * 50 + "\n"
         output += f"F-statistic: {r['F_statistic']:.4f}\n"
         output += f"p-value: {r['p_value']:.6f}\n"
+        output += f"Eta Squared (η²): {r['eta_squared']:.4f}\n"
         output += f"Alpha level: {r['alpha']}\n"
         output += f"Degrees of Freedom: ({r['df_between']}, {r['df_within']})\n\n"
         
@@ -530,14 +487,12 @@ class ANOVAAnalyzer(ctk.CTk):
         output += "CONCLUSION:\n"
         output += f"{r['conclusion']}\n"
         
-        # Post-hoc if significant
         if r['is_significant']:
             output += "\n\n" + "=" * 50 + "\n"
             output += "POST HOC ANALYSIS (Tukey HSD)\n"
             output += "=" * 50 + "\n"
             
             try:
-                # Prepare data for Tukey
                 labels = []
                 for i, group in enumerate(r['groups']):
                     labels.extend([r['group_names'][i]] * len(group))
@@ -545,20 +500,110 @@ class ANOVAAnalyzer(ctk.CTk):
                 tukey = pairwise_tukeyhsd(r['all_data'], labels)
                 output += "\n" + str(tukey) + "\n"
                 
-                # Store tukey results
                 self.anova_results['tukey'] = tukey
             except Exception as e:
                 output += f"\nCould not perform post-hoc analysis: {str(e)}\n"
         
         self.results_text.insert("1.0", output)
     
+    def set_cell_border(self, cell, **kwargs):
+        """Set cell borders for APA table formatting"""
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        
+        tcBorders = OxmlElement('w:tcBorders')
+        for edge in ('top', 'left', 'bottom', 'right'):
+            if edge in kwargs:
+                border = OxmlElement(f'w:{edge}')
+                for key, value in kwargs[edge].items():
+                    border.set(qn(f'w:{key}'), str(value))
+                tcBorders.append(border)
+        
+        tcPr.append(tcBorders)
+    
+    def create_apa_table(self, doc, data, headers, caption):
+        """Create an APA 7th Edition formatted table"""
+        caption_para = doc.add_paragraph()
+        caption_run = caption_para.add_run(caption)
+        caption_run.font.name = 'Times New Roman'
+        caption_run.font.size = Pt(8)
+        caption_run.bold = True
+        caption_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+        caption_para.space_after = Pt(2)
+        
+        table = doc.add_table(rows=len(data) + 1, cols=len(headers))
+        table.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        
+        for i, header in enumerate(headers):
+            cell = table.rows[0].cells[i]
+            cell.text = header
+            
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                for run in paragraph.runs:
+                    run.font.name = 'Times New Roman'
+                    run.font.size = Pt(7)
+                    run.bold = True
+            
+            self.set_cell_border(
+                cell,
+                top={"sz": 12, "val": "single", "color": "000000"},
+                bottom={"sz": 8, "val": "single", "color": "000000"},
+                left={"sz": 0, "val": "none"},
+                right={"sz": 0, "val": "none"}
+            )
+        
+        for row_idx, row_data in enumerate(data, start=1):
+            for col_idx, value in enumerate(row_data):
+                cell = table.rows[row_idx].cells[col_idx]
+                cell.text = str(value)
+                
+                for paragraph in cell.paragraphs:
+                    if col_idx == 0:
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                    else:
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    
+                    for run in paragraph.runs:
+                        run.font.name = 'Times New Roman'
+                        run.font.size = Pt(9)
+                
+                if row_idx == len(data):
+                    self.set_cell_border(
+                        cell,
+                        top={"sz": 0, "val": "none"},
+                        bottom={"sz": 12, "val": "single", "color": "000000"},
+                        left={"sz": 0, "val": "none"},
+                        right={"sz": 0, "val": "none"}
+                    )
+                else:
+                    self.set_cell_border(
+                        cell,
+                        top={"sz": 0, "val": "none"},
+                        bottom={"sz": 0, "val": "none"},
+                        left={"sz": 0, "val": "none"},
+                        right={"sz": 0, "val": "none"}
+                    )
+        
+        space_para = doc.add_paragraph()
+        space_para.space_before = Pt(0)
+        space_para.space_after = Pt(2)
+        
+        return table
+    
+    def format_p_value(self, p):
+        """Format p-value according to APA style"""
+        if p < 0.001:
+            return "< .001"
+        else:
+            return f"{p:.3f}".lstrip('0')
+    
     def save_to_docx(self):
-        """Save ANOVA results to a DOCX file"""
+        """Save ANOVA results to a DOCX file with TWO-COLUMN layout"""
         if self.anova_results is None:
             messagebox.showwarning("Warning", "No results to save! Run ANOVA first.")
             return
         
-        # Ask user for save location
         filepath = filedialog.asksaveasfilename(
             defaultextension=".docx",
             filetypes=[("Word Document", "*.docx"), ("All Files", "*.*")],
@@ -571,217 +616,330 @@ class ANOVAAnalyzer(ctk.CTk):
         try:
             r = self.anova_results
             
-            # Create document
             doc = Document()
             
-            # Title
-            title = doc.add_heading(r['report_title'], 1)
+            # Set narrow margins for more space
+            sections = doc.sections
+            for section in sections:
+                section.top_margin = Inches(0.5)
+                section.bottom_margin = Inches(0.5)
+                section.left_margin = Inches(0.5)
+                section.right_margin = Inches(0.5)
+            
+            # Set document defaults
+            style = doc.styles['Normal']
+            font = style.font
+            font.name = 'Times New Roman'
+            font.size = Pt(12)
+            
+            # Title (centered, spans full width)
+            title = doc.add_heading(r['report_title'], 0)
             title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            title.space_after = Pt(2)
             for run in title.runs:
-                run.font.size = Pt(16)
+                run.font.name = 'Times New Roman'
+                run.font.size = Pt(12)
+                run.bold = True
             
-            # Subtitle (if provided)
+            # Subtitle
             if r['report_subtitle']:
-                subtitle = doc.add_heading(r['report_subtitle'], level=2)
+                subtitle = doc.add_paragraph(r['report_subtitle'])
                 subtitle.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                subtitle.space_after = Pt(1)
                 for run in subtitle.runs:
-                    run.font.size = Pt(12)
+                    run.font.name = 'Times New Roman'
+                    run.font.size = Pt(10)
             
-            # Researcher name (if provided)
+            # Researcher name
             if r['researcher_name']:
                 name_para = doc.add_paragraph(f"By: {r['researcher_name']}")
                 name_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                name_para.space_after = Pt(6)
                 for run in name_para.runs:
-                    run.font.size = Pt(10)
+                    run.font.name = 'Times New Roman'
+                    run.font.size = Pt(9)
             
-            doc.add_paragraph()
+            # CREATE TWO-COLUMN TABLE FOR LAYOUT
+            layout_table = doc.add_table(rows=1, cols=2)
+            layout_table.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            
+            # Remove all borders from layout table
+            for row in layout_table.rows:
+                for cell in row.cells:
+                    self.set_cell_border(
+                        cell,
+                        top={"sz": 0, "val": "none"},
+                        bottom={"sz": 0, "val": "none"},
+                        left={"sz": 0, "val": "none"},
+                        right={"sz": 0, "val": "none"}
+                    )
+            
+            # Set column widths
+            layout_table.columns[0].width = Inches(3.5)
+            layout_table.columns[1].width = Inches(3.5)
+            
+            # Get left and right cells
+            left_cell = layout_table.rows[0].cells[0]
+            right_cell = layout_table.rows[0].cells[1]
+            
+            # LEFT COLUMN CONTENT
+            left_doc_content = []
             
             # Descriptive Statistics
-            doc.add_heading('Descriptive Statistics', level=2)
-            for run in doc.paragraphs[-1].runs:
-                run.font.size = Pt(11)
+            desc_heading = left_cell.add_paragraph()
+            desc_run = desc_heading.add_run("Descriptive Statistics")
+            desc_run.font.name = 'Times New Roman'
+            desc_run.font.size = Pt(12)
+            desc_run.bold = True
+            desc_heading.space_after = Pt(2)
             
-            desc_table = doc.add_table(rows=len(r['groups']) + 1, cols=4)
-            desc_table.style = 'Table Grid'
+            desc_headers = ['Group', 'n', 'M', 'SD']
+            desc_data = []
             
-            headers = ['Group', 'n', 'Mean', 'Std. Dev']
-            for i, header in enumerate(headers):
-                cell = desc_table.rows[0].cells[i]
-                cell.text = header
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.bold = True
+            for name, group in zip(r['group_names'], r['groups']):
+                desc_data.append([
+                    name,
+                    str(len(group)),
+                    f"{np.mean(group):.2f}",
+                    f"{np.std(group, ddof=1):.2f}"
+                ])
             
-            for i, (name, group) in enumerate(zip(r['group_names'], r['groups']), 1):
-                desc_table.rows[i].cells[0].text = name
-                desc_table.rows[i].cells[1].text = str(len(group))
-                desc_table.rows[i].cells[2].text = f"{np.mean(group):.4f}"
-                desc_table.rows[i].cells[3].text = f"{np.std(group, ddof=1):.4f}"
-            
-            # Set font size for table
-            for row in desc_table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.size = Pt(9)
-            
-            doc.add_paragraph()
+            self.create_mini_table(left_cell, desc_data, desc_headers)
             
             # ANOVA Table
-            doc.add_heading('ANOVA Table', level=2)
-            for run in doc.paragraphs[-1].runs:
-                run.font.size = Pt(11)
+            anova_heading = left_cell.add_paragraph()
+            anova_heading.space_before = Pt(4)
+            anova_run = anova_heading.add_run("One-Way ANOVA Results")
+            anova_run.font.name = 'Times New Roman'
+            anova_run.font.size = Pt(12)
+            anova_run.bold = True
+            anova_heading.space_after = Pt(2)
             
-            anova_table = doc.add_table(rows=4, cols=6)
-            anova_table.style = 'Table Grid'
+            anova_headers = ['Source', 'SS', 'df', 'MS', 'F', 'p', 'η²']
+            anova_data = []
             
-            headers = ['Source', 'SS', 'df', 'MS', 'F', 'p-value']
-            for i, header in enumerate(headers):
-                cell = anova_table.rows[0].cells[i]
-                cell.text = header
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.bold = True
+            anova_data.append([
+                'Between',
+                f"{r['SS_between']:.2f}",
+                str(r['df_between']),
+                f"{r['MS_between']:.2f}",
+                f"{r['F_statistic']:.2f}",
+                self.format_p_value(r['p_value']),
+                f"{r['eta_squared']:.3f}"
+            ])
             
-            # Between Groups
-            anova_table.rows[1].cells[0].text = 'Between Groups'
-            anova_table.rows[1].cells[1].text = f"{r['SS_between']:.4f}"
-            anova_table.rows[1].cells[2].text = str(r['df_between'])
-            anova_table.rows[1].cells[3].text = f"{r['MS_between']:.4f}"
-            anova_table.rows[1].cells[4].text = f"{r['F_statistic']:.4f}"
-            anova_table.rows[1].cells[5].text = f"{r['p_value']:.6f}"
+            anova_data.append([
+                'Within',
+                f"{r['SS_within']:.2f}",
+                str(r['df_within']),
+                f"{r['MS_within']:.2f}",
+                '', '', ''
+            ])
             
-            # Within Groups
-            anova_table.rows[2].cells[0].text = 'Within Groups'
-            anova_table.rows[2].cells[1].text = f"{r['SS_within']:.4f}"
-            anova_table.rows[2].cells[2].text = str(r['df_within'])
-            anova_table.rows[2].cells[3].text = f"{r['MS_within']:.4f}"
+            anova_data.append([
+                'Total',
+                f"{r['SS_total']:.2f}",
+                str(r['df_between'] + r['df_within']),
+                '', '', '', ''
+            ])
             
-            # Total
-            anova_table.rows[3].cells[0].text = 'Total'
-            anova_table.rows[3].cells[1].text = f"{r['SS_total']:.4f}"
-            anova_table.rows[3].cells[2].text = str(r['df_between'] + r['df_within'])
+            anova_table = self.create_mini_table(left_cell, anova_data, anova_headers)
             
-            # Set font size for ANOVA table
-            for row in anova_table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.size = Pt(9)
+            # Note for ANOVA
+            note_para = left_cell.add_paragraph()
+            note_para.space_before = Pt(0)
+            note_para.space_after = Pt(4)
+            note_run = note_para.add_run(f"Note. α = {r['alpha']}. η² = effect size.")
+            note_run.font.name = 'Times New Roman'
+            note_run.font.size = Pt(10)
+            note_run.italic = True
             
-            doc.add_paragraph()
+            # Raw Data Table
+            raw_heading = left_cell.add_paragraph()
+            raw_heading.space_before = Pt(4)
+            raw_run = raw_heading.add_run("Raw Data by Group")
+            raw_run.font.name = 'Times New Roman'
+            raw_run.font.size = Pt(11)
+            raw_run.bold = True
+            raw_heading.space_after = Pt(2)
             
-            # Test Results
-            doc.add_heading('Test Results', level=2)
-            for run in doc.paragraphs[-1].runs:
-                run.font.size = Pt(11)
+            raw_headers = ['Group', 'n', 'Values']
+            raw_data = []
             
-            results_para = doc.add_paragraph()
-            results_para.add_run('F-statistic: ').bold = True
-            results_para.add_run(f"{r['F_statistic']:.4f}\n")
-            results_para.add_run('p-value: ').bold = True
-            results_para.add_run(f"{r['p_value']:.6f}\n")
-            results_para.add_run('Alpha level: ').bold = True
-            results_para.add_run(f"{r['alpha']}\n")
-            results_para.add_run('Degrees of Freedom: ').bold = True
-            results_para.add_run(f"({r['df_between']}, {r['df_within']})\n\n")
-            results_para.add_run('Decision: ').bold = True
-            results_para.add_run(f"{r['decision']}\n")
+            for name, group in zip(r['group_names'], r['groups']):
+                values_str = ', '.join([f"{v:.1f}" for v in group])
+                if len(values_str) > 40:
+                    values_str = values_str[:37] + "..."
+                
+                raw_data.append([
+                    name,
+                    str(len(group)),
+                    values_str
+                ])
             
-            # Set font size for results
-            for run in results_para.runs:
-                run.font.size = Pt(10)
+            self.create_mini_table(left_cell, raw_data, raw_headers)
             
+            # RIGHT COLUMN CONTENT
             # Conclusion
-            doc.add_heading('Conclusion', level=2)
-            for run in doc.paragraphs[-1].runs:
-                run.font.size = Pt(11)
+            conclusion_heading = right_cell.add_paragraph()
+            conclusion_run = conclusion_heading.add_run("Conclusion")
+            conclusion_run.font.name = 'Times New Roman'
+            conclusion_run.font.size = Pt(10)
+            conclusion_run.bold = True
+            conclusion_heading.space_after = Pt(2)
             
-            conclusion_para = doc.add_paragraph()
-            conclusion_para.add_run(r['conclusion']).bold = True
-            for run in conclusion_para.runs:
-                run.font.size = Pt(10)
+            conclusion_para = right_cell.add_paragraph()
+            conclusion_para.space_after = Pt(1)
+            conclusion_text = conclusion_para.add_run(r['conclusion'])
+            conclusion_text.font.name = 'Times New Roman'
+            conclusion_text.font.size = Pt(11)
             
-            # Post-hoc if significant
+            # APA format statistical statement
+            stat_para = right_cell.add_paragraph()
+            stat_para.space_after = Pt(4)
+            
+            if r['is_significant']:
+                apa_text = (f"The one-way ANOVA was significant, F({r['df_between']}, {r['df_within']}) = "
+                           f"{r['F_statistic']:.2f}, {self.format_p_value(r['p_value'])}, "
+                           f"η² = {r['eta_squared']:.3f}.")
+            else:
+                apa_text = (f"The one-way ANOVA was not significant, F({r['df_between']}, {r['df_within']}) = "
+                           f"{r['F_statistic']:.2f}, {self.format_p_value(r['p_value'])}, "
+                           f"η² = {r['eta_squared']:.3f}.")
+            
+            stat_run = stat_para.add_run(apa_text)
+            stat_run.font.name = 'Times New Roman'
+            stat_run.font.size = Pt(11)
+            stat_run.italic = True
+            
+            # Post Hoc Analysis (if significant)
             if r['is_significant'] and 'tukey' in r:
-                doc.add_paragraph()
-                doc.add_heading('Post Hoc Analysis (Tukey HSD)', level=2)
-                for run in doc.paragraphs[-1].runs:
-                    run.font.size = Pt(11)
+                posthoc_heading = right_cell.add_paragraph()
+                posthoc_heading.space_before = Pt(4)
+                posthoc_run = posthoc_heading.add_run("Post Hoc Analysis (Tukey HSD)")
+                posthoc_run.font.name = 'Times New Roman'
+                posthoc_run.font.size = Pt(11)
+                posthoc_run.bold = True
+                posthoc_heading.space_after = Pt(2)
                 
                 tukey = r['tukey']
-                tukey_data = tukey.summary().data
+                tukey_summary = tukey.summary()
                 
-                posthoc_table = doc.add_table(rows=len(tukey_data), cols=len(tukey_data[0]))
-                posthoc_table.style = 'Table Grid'
+                posthoc_headers = ['Comparison', 'Diff', 'CI Low', 'CI High', 'p', 'Sig']
+                posthoc_data = []
                 
-                for i, row in enumerate(tukey_data):
-                    for j, val in enumerate(row):
-                        cell = posthoc_table.rows[i].cells[j]
-                        cell.text = str(val)
-                        if i == 0:
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    run.bold = True
+                for row in tukey_summary.data[1:]:
+                    group1 = str(row[0])
+                    group2 = str(row[1])
+                    meandiff = float(row[2])
+                    lower = float(row[3])
+                    upper = float(row[4])
+                    reject = row[5]
+                    p_adj = float(row[6]) if len(row) > 6 else 0.05
+                    
+                    comparison = f"{group1} vs {group2}"
+                    significant = "Yes" if reject else "No"
+                    
+                    posthoc_data.append([
+                        comparison,
+                        f"{meandiff:.2f}",
+                        f"{lower:.2f}",
+                        f"{upper:.2f}",
+                        self.format_p_value(p_adj),
+                        significant
+                    ])
                 
-                # Set font size for post-hoc table
-                for row in posthoc_table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            for run in paragraph.runs:
-                                run.font.size = Pt(8)
+                self.create_mini_table(right_cell, posthoc_data, posthoc_headers)
+                
+                # Note for post hoc
+                note_para = right_cell.add_paragraph()
+                note_para.space_before = Pt(0)
+                note_run = note_para.add_run("Note. CI = 95% confidence interval.")
+                note_run.font.name = 'Times New Roman'
+                note_run.font.size = Pt(7)
+                note_run.italic = True
             
-            # Input Data Table
-            doc.add_heading('Raw Data', level=2)
-            for run in doc.paragraphs[-1].runs:
-                run.font.size = Pt(11)
-            
-            input_table = doc.add_table(rows=len(r['groups']) + 1, cols=3)
-            input_table.style = 'Table Grid'
-            
-            # Headers
-            headers = ['Group', 'n', 'Values']
-            for i, header in enumerate(headers):
-                cell = input_table.rows[0].cells[i]
-                cell.text = header
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.bold = True
-            
-            # Data rows
-            for i, (name, group) in enumerate(zip(r['group_names'], r['groups']), 1):
-                input_table.rows[i].cells[0].text = name
-                input_table.rows[i].cells[1].text = str(len(group))
-                input_table.rows[i].cells[2].text = ', '.join([f"{v:.2f}" for v in group])
-            
-            # Set font size for input data table
-            for row in input_table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            run.font.size = Pt(8)
-            
+            # Footer at bottom
             doc.add_paragraph()
-            # Save document
+            footer_para = doc.add_paragraph()
+            footer_para.space_before = Pt(6)
+            footer_run = footer_para.add_run(
+                f"{datetime.now().strftime('%B %d, %Y at %I:%M %p')} | File: {filepath.split('/')[-1]}"
+            )
+            footer_run.font.name = 'Times New Roman'
+            footer_run.font.size = Pt(7)
+            footer_run.font.color.rgb = RGBColor(128, 128, 128)
+            footer_run.italic = True
+            footer_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            
             doc.save(filepath)
             
-            # Add file location and date at the bottom
-            last_para = doc.add_paragraph()
-            run = last_para.add_run(f"File Location: {filepath}     Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(128, 128, 128)  # Grey color
-            run.italic = True
-            
-            # Save document again with the footer
-            doc.save(filepath)
-            
-            # Update file location label
             self.file_location_label.configure(text=f"Last saved: {filepath}")
             
-            messagebox.showinfo("Success", f"Report saved successfully!\n\n{filepath}")
+            messagebox.showinfo("Success", f"Two-column APA report saved!\n\n{filepath}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save document:\n{str(e)}")
+    
+    def create_mini_table(self, cell, data, headers):
+        """Create a mini table inside a cell for two-column layout"""
+        # Add the table to the cell
+        table = cell.add_table(rows=len(data) + 1, cols=len(headers))
+        
+        # Set headers
+        for i, header in enumerate(headers):
+            header_cell = table.rows[0].cells[i]
+            header_cell.text = header
+            
+            for paragraph in header_cell.paragraphs:
+                paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                for run in paragraph.runs:
+                    run.font.name = 'Times New Roman'
+                    run.font.size = Pt(7)
+                    run.bold = True
+            
+            self.set_cell_border(
+                header_cell,
+                top={"sz": 12, "val": "single", "color": "000000"},
+                bottom={"sz": 8, "val": "single", "color": "000000"},
+                left={"sz": 0, "val": "none"},
+                right={"sz": 0, "val": "none"}
+            )
+        
+        # Populate data
+        for row_idx, row_data in enumerate(data, start=1):
+            for col_idx, value in enumerate(row_data):
+                data_cell = table.rows[row_idx].cells[col_idx]
+                data_cell.text = str(value)
+                
+                for paragraph in data_cell.paragraphs:
+                    if col_idx == 0:
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                    else:
+                        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    
+                    for run in paragraph.runs:
+                        run.font.name = 'Times New Roman'
+                        run.font.size = Pt(7)
+                
+                if row_idx == len(data):
+                    self.set_cell_border(
+                        data_cell,
+                        top={"sz": 0, "val": "none"},
+                        bottom={"sz": 12, "val": "single", "color": "000000"},
+                        left={"sz": 0, "val": "none"},
+                        right={"sz": 0, "val": "none"}
+                    )
+                else:
+                    self.set_cell_border(
+                        data_cell,
+                        top={"sz": 0, "val": "none"},
+                        bottom={"sz": 0, "val": "none"},
+                        left={"sz": 0, "val": "none"},
+                        right={"sz": 0, "val": "none"}
+                    )
+        
+        return table
 
 
 def main():
