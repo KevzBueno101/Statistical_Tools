@@ -195,9 +195,3 @@ The `.exe` will be in the `dist/` folder.
 
 ---
 
-## 📄 License
-
-For educational and research purposes.
-
----
-
