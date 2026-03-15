@@ -1,209 +1,203 @@
-# Statistical Analysis Suite
+# 📊 Statistical Analysis Suite
 
-A unified desktop application integrating five professional statistical analysis tools for research and data analysis.
+A modern, sleek desktop application integrating professional statistical analysis tools for research and academic use. Built with Python and CustomTkinter — featuring a dark/light themed UI, APA-style reporting, and shared settings across all modules.
 
-## 📊 Features
+---
 
-### Included Analysis Tools:
-1. **One-Way ANOVA Analyzer** - Compare means across multiple groups with post-hoc tests
-2. **Cronbach's Alpha Test** - Assess internal consistency reliability with Likert scale expander
-3. **Independent t-test** - Compare means between two independent groups
-4. **Spearman's Correlation** - Analyze rank-order relationships with visualization
-5. **Cohen's Kappa Calculator** - Measure inter-rater agreement with JASP-style reports
+## ✨ Modules
 
-## 🚀 Installation
+| # | Module | File | Description |
+|---|--------|------|-------------|
+| 1 | **One-Way ANOVA** | `anova_analyzer.py` | Compare means across multiple groups with Tukey HSD post-hoc test |
+| 2 | **t-Test Analysis** | `ttest_analyzer.py` | One-sample, Independent, and Paired t-tests with Cohen's d effect size |
+| 3 | **Cronbach's Alpha** | `cronbach_alpha.py` | Internal consistency reliability with Likert frequency expander |
+| 4 | **Chi-Square Test** | `chi_square_test.py` | Goodness-of-fit and test of independence with contingency tables |
+| 5 | **Spearman Correlation** | `spearman_correl.py` | Rank-order correlation analysis with scatter plot visualization |
+| 6 | **Cohen's Kappa** | `cohen_kappa.py` | Inter-rater agreement with JASP-style APA output |
+| 7 | **Regression Analysis** | `regression_analysis.py` | Simple and multiple linear regression with diagnostics |
+| 8 | **Database** | `database.py` | Data management and storage utilities |
+
+---
+
+## 🎨 UI Highlights
+
+- **Dark/Light theme** toggle
+- **Teal accent** color scheme (customizable via Settings)
+- **Resizable panels** — drag the divider between columns
+- **Shared ⚙ Settings** across all modules:
+  - Theme (Dark / Light / System)
+  - Accent Color (6 options: Teal, Blue, Purple, Orange, Rose, Green)
+  - Font Family & Size
+  - Sidebar Width (Compact / Normal / Wide)
+  - Decimal Places (2 / 3 / 4)
+  - APA p-value formatting toggle
+  - Results text wrap mode
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 - Python 3.8 or higher
-- pip (Python package manager)
+- pip
 
-### Setup Steps
+### Installation
 
-1. **Extract the application files** to a folder
+```bash
+# 1. Clone the repository
+git clone https://github.com/KevzBueno101/Statistical_Tools.git
+cd Statistical_Tools
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 2. Install dependencies
+pip install -r requirements.txt
 
-3. **Run the application**:
-   ```bash
-   python main.py
-   ```
+# 3. Run the app
+python main.py
+```
+
+---
 
 ## 📁 Project Structure
 
 ```
-StatisticalAnalysisApp/
+Statistical_Tools/
 │
-├── main.py                          # Main menu application
+├── main.py                          # Main menu launcher
+├── app_settings.py                  # Shared settings module (all apps)
+├── requirements.txt
+├── README.md
+│
 ├── modules/
 │   ├── __init__.py
-│   ├── anova_analyzer.py           # ANOVA module
-│   ├── cronbach_alpha.py           # Cronbach's Alpha module
-│   ├── ttest_analyzer.py           # t-test module
-│   ├── spearman_correlation.py     # Spearman module
-│   └── cohen_kappa.py              # Cohen's Kappa module
+│   ├── anova_analyzer.py            # One-Way ANOVA
+│   ├── ttest_analyzer.py            # t-Test Analysis
+│   ├── cronbach_alpha.py            # Cronbach's Alpha
+│   ├── chi_square_test.py           # Chi-Square Test
+│   ├── spearman_correl.py           # Spearman Correlation
+│   ├── cohen_kappa.py               # Cohen's Kappa
+│   ├── regression_analysis.py       # Regression Analysis
+│   └── database.py                  # Data Management
 │
-├── output/                         # Generated reports
-├── requirements.txt
-└── README.md
+├── assets/                          # Icons and images
+└── output/                          # Generated reports (auto-created)
 ```
-
-## 🔨 Building Standalone Executable (.exe)
-
-### Using PyInstaller
-
-1. **Install PyInstaller**:
-   ```bash
-   pip install pyinstaller
-   ```
-
-2. **Create the executable**:
-   ```bash
-   pyinstaller --onefile --windowed --name "StatisticalAnalysisSuite" main.py
-   ```
-
-3. **For a cleaner build with icon** (if you have icon.ico):
-   ```bash
-   pyinstaller --onefile --windowed --name "StatsApp" --icon=assets/icon.ico main.py
-   ```
-
-4. **Advanced build with all dependencies**:
-   ```bash
-   pyinstaller --onefile ^
-               --windowed ^
-               --name="StatsApp" ^
-               --icon=assets/stats.ico ^
-               --add-data="modules;modules" ^
-               --hidden-import=scipy ^
-               --hidden-import=scipy.stats ^
-               --hidden-import=statsmodels ^
-               --hidden-import=matplotlib ^
-               --collect-all=customtkinter ^
-               --collect-all=matplotlib ^
-               main.py
-   ```
-
-5. **Find your executable**:
-   - The `.exe` file will be in the `dist/` folder
-   - You can distribute this single file to users (no Python needed)
-
-### Build Notes
-- First build may take 5-10 minutes
-- Resulting .exe will be 50-100MB (includes all dependencies)
-- Test the .exe on a clean machine without Python installed
-- Include a README with the .exe for end users
-
-### Troubleshooting Build Issues
-
-**If modules are not found:**
-```bash
-pyinstaller --onefile --windowed --paths=./modules main.py
-```
-
-**If customtkinter assets are missing:**
-```bash
-pyinstaller --collect-all customtkinter main.py
-```
-
-**For debugging:**
-Remove `--windowed` flag to see console output:
-```bash
-pyinstaller --onefile main.py
-```
-
-## 📖 Usage Guide
-
-### Starting the Application
-1. Run `main.py` or the compiled `.exe`
-2. The main menu will appear with all available tools
-3. Click any tool button to launch that module
-4. Each module operates independently
-
-### Data Input Methods
-- **Manual Entry**: Type data directly into input fields
-- **CSV Import**: Load data from comma-separated files
-- **Excel Import**: Load data from .xlsx/.xls files
-- **Clipboard Paste**: Paste data from spreadsheets
-
-### Output Formats
-- **PDF Reports**: Professional formatted reports
-- **DOCX Reports**: Editable Microsoft Word documents
-- **Excel Exports**: Data tables and results
-- **JSON**: Results data for further processing
-
-## 🛠️ Technical Details
-
-### Dependencies
-- **CustomTkinter**: Modern GUI framework
-- **NumPy/Pandas**: Data manipulation
-- **SciPy**: Statistical computations
-- **Statsmodels**: Advanced statistical models
-- **Matplotlib/Seaborn**: Data visualization
-- **ReportLab**: PDF generation
-- **python-docx**: Word document generation
-
-### Platform Support
-- Windows 10/11 (fully tested)
-- macOS 10.14+ (compatible)
-- Linux (Ubuntu 20.04+, compatible)
-
-### Performance
-- Handles datasets up to 10,000 rows efficiently
-- Real-time computation for most analyses
-- Multi-threaded where applicable
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**"Module not found" error:**
-- Ensure all dependencies are installed: `pip install -r requirements.txt`
-- Check Python version: `python --version` (3.8+ required)
-
-**GUI not displaying correctly:**
-- Update CustomTkinter: `pip install --upgrade customtkinter`
-- Check display scaling settings (Windows)
-
-**Import errors in compiled .exe:**
-- Rebuild with `--collect-all` flag for missing packages
-- Ensure all modules are in correct directories
-
-**File save/export errors:**
-- Check write permissions in output directory
-- Ensure sufficient disk space
-
-## 📞 Support
-
-For issues, feature requests, or contributions:
-- Check existing issues in documentation
-- Verify all dependencies are correctly installed
-- Test on latest Python version (3.11+ recommended)
-
-## 📄 License
-
-This application is provided for educational and research purposes.
-Individual modules may have their own licensing requirements.
-
-## 🎯 Version History
-
-- **v1.0.0** - Initial release with 5 integrated modules
-  - One-Way ANOVA Analyzer
-  - Cronbach's Alpha Test
-  - Independent t-test
-  - Spearman's Correlation
-  - Cohen's Kappa Calculator
-
-## 🔮 Future Enhancements
-
-Planned features for future releases:
-- Batch processing mode
-- Custom report templates
-- Data visualization gallery
-- Multiple language support
-- Cloud storage integration
 
 ---
 
-**Built with ❤️ for researchers, statisticians, and data analysts**
+## 📦 Dependencies
+
+```
+customtkinter
+numpy
+pandas
+scipy
+statsmodels
+matplotlib
+seaborn
+reportlab
+python-docx
+openpyxl
+```
+
+Install all at once:
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 📄 Export Options
+
+Each module supports:
+- **DOCX** — APA-formatted Word document report
+- **PDF** — Professional PDF report (via ReportLab)
+- **Excel / CSV** — Raw data export
+
+---
+
+## ⚙️ Settings
+
+A shared settings panel (`app_settings.py`) persists preferences across all modules via `.stat_suite_settings.json`:
+
+| Setting | Options |
+|---------|---------|
+| Theme | Dark / Light / System |
+| Accent Color | Teal, Blue, Purple, Orange, Rose, Green |
+| Font Family | Segoe UI, Calibri, Helvetica, Arial, Courier New |
+| Font Size | Small, Medium, Large, Extra Large |
+| Sidebar Width | Compact, Normal, Wide |
+| Decimal Places | 2, 3, 4 |
+| Results Wrap | None, Word, Char |
+| APA p-value | Toggle `p < .001` format |
+| Show Tips | Toggle inline helper hints |
+
+---
+
+## 🔨 Build Standalone Executable (.exe)
+
+```bash
+pip install pyinstaller
+
+pyinstaller --onefile --windowed ^
+  --name "StatisticalSuite" ^
+  --add-data "modules;modules" ^
+  --add-data "assets;assets" ^
+  --collect-all customtkinter ^
+  --hidden-import=scipy ^
+  --hidden-import=scipy.stats ^
+  --hidden-import=statsmodels ^
+  --hidden-import=matplotlib ^
+  main.py
+```
+
+The `.exe` will be in the `dist/` folder.
+
+---
+
+## 🐛 Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `Module not found` | Run `pip install -r requirements.txt` |
+| `app_settings` import error | Make sure `app_settings.py` is in the **root** folder, same level as `main.py` |
+| Settings not saving | Check write permissions in app folder |
+| GUI looks wrong | Run `pip install --upgrade customtkinter` |
+| Push rejected on git | Run `git pull origin main` first, then push again |
+
+---
+
+## 📖 How to Use
+
+1. Run `python main.py` — main menu appears
+2. Click any tool button to launch that module
+3. Each module opens independently in its own window
+4. Click **⚙ Settings** in any sidebar to customize the UI
+5. Settings are shared and saved automatically across all modules
+
+---
+
+## 🎯 Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| **v2.0.0** | Mar 2026 | Modern UI redesign — dark sidebar, teal accent, resizable panels, shared settings, 8 modules |
+| **v1.0.0** | Jan 2026 | Initial release with 5 integrated modules |
+
+---
+
+## 🔮 Planned Features
+
+- [ ] Batch processing mode
+- [ ] Custom report templates
+- [ ] Data visualization gallery
+- [ ] Descriptive statistics module
+- [ ] Multiple language support
+
+---
+
+## 📄 License
+
+For educational and research purposes.
+
+---
+
