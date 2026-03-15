@@ -1,0 +1,26 @@
+# Compiled/Build files
+build/
+dist/
+*.spec
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Settings file
+.stat_suite_settings.json
+
+# Generated reports/outputs
+output/
+*.pdf
+*.docx
+*.xlsx
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
