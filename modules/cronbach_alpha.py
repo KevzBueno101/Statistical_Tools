@@ -10,6 +10,8 @@ Features:
 - APA-style output
 """
 
+import tempfile
+
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import pandas as pd
@@ -367,6 +369,9 @@ class Sidebar(ctk.CTkFrame):
         self.export_btn = sidebar_btn(self, "📄  Export PDF",
                                       fg="#1d4ed8", hover="#1e3a8a", state="disabled")
         self.export_btn.pack(**pad)
+        self.print_btn = sidebar_btn(self, "🖨️  Print Report",
+                              fg="#7c3aed", hover="#6d28d9", state="disabled")
+        self.print_btn.pack(**pad)
 
         self.export_data_btn = sidebar_btn(self, "💾  Export Dataset",
                                             fg="#0f766e", hover="#134e4a", state="disabled")
@@ -394,6 +399,9 @@ class Sidebar(ctk.CTkFrame):
                                           text_color=ACCENT, fg_color=BG_CARD,
                                           wraplength=206)
         self.status_label.pack(side="bottom", padx=12, pady=8)
+        
+        
+        
 
 
 # ─── Likert Popup ─────────────────────────────────────────────────────────────
@@ -593,6 +601,7 @@ class CronbachAlphaApp(ctk.CTk):
         self.sidebar.likert_btn.configure(command=self.open_likert)
         self.sidebar.compute_btn.configure(command=self.compute_alpha)
         self.sidebar.export_btn.configure(command=self.export_pdf)
+        self.sidebar.print_btn.configure(command=self.print_report)
         self.sidebar.export_data_btn.configure(command=self.export_dataset)
         self.sidebar.clear_btn.configure(command=self.clear_all)
         self.sidebar.theme_btn.configure(command=self.toggle_theme)
@@ -837,6 +846,7 @@ class CronbachAlphaApp(ctk.CTk):
 
             self._set_results(txt)
             self.sidebar.export_btn.configure(state="normal")
+            self.sidebar.print_btn.configure(state="normal")
             self.stat_label.configure(
                 text=f"α = {r['alpha']:.4f}   {r['interpretation']}   "
                      f"k={r['n_items']}   N={r['n_respondents']}"
@@ -873,6 +883,47 @@ class CronbachAlphaApp(ctk.CTk):
             messagebox.showinfo("Saved", f"PDF exported:\n{fp}")
         except Exception as e:
             messagebox.showerror("Error", f"Export failed:\n{e}")
+    def print_report(self):
+        if self.results is None:
+            messagebox.showwarning("No Results", "Compute alpha first."); return
+        import tempfile, subprocess, sys, os
+
+        # Generate a temp PDF
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+
+        try:
+            PDFReport.generate(
+                self.results,
+                self.desc_text.get("1.0", "end-1c"),
+                tmp_path,
+                title=self.sidebar.title_entry.get().strip() or "Reliability Test",
+                subtitle=self.sidebar.subtitle_entry.get().strip(),
+                byline=self.sidebar.author_entry.get().strip()
+            )
+
+            if sys.platform == "win32":
+                # Use ShellExecute to open the system print dialog
+                import ctypes
+                ctypes.windll.shell32.ShellExecuteW(
+                    None, "print", tmp_path, None, None, 0
+                )
+            elif sys.platform == "darwin":
+                subprocess.run(["lpr", tmp_path])
+            else:
+                # Linux — try lpr, fallback to xdg-open
+                result = subprocess.run(["lpr", tmp_path])
+                if result.returncode != 0:
+                    subprocess.run(["xdg-open", tmp_path])
+
+            self.sidebar.status_label.configure(text="🖨️ Sent to printer")
+
+        except Exception as e:
+            messagebox.showerror("Print Error", f"Printing failed:\n{e}")
+            # Clean up temp file on error
+            try: os.unlink(tmp_path)
+            except: pass
 
     def export_dataset(self):
         if self.df is None:

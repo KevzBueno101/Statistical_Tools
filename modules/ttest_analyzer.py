@@ -9,6 +9,7 @@ Implements:
 - APA-style reporting
 - DOCX / PDF export
 - Excel / CSV import
+- ★ NEW: Summary Statistics input mode (M, SD, N)
 """
 
 import customtkinter as ctk
@@ -19,7 +20,12 @@ from scipy import stats
 from datetime import datetime
 import re
 import os
-from app_settings import SettingsManager, SettingsWindow
+
+try:
+    from app_settings import SettingsManager, SettingsWindow
+    SETTINGS_AVAILABLE = True
+except ImportError:
+    SETTINGS_AVAILABLE = False
 
 try:
     from docx import Document
@@ -42,7 +48,7 @@ except ImportError:
     PDF_AVAILABLE = False
 
 
-# ─── Palette (identical to ANOVA Analyzer) ───────────────────────────────────
+# ─── Palette ──────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -59,6 +65,8 @@ PURPLE    = "#a855f7"
 TEXT_PRI  = "#e6edf3"
 TEXT_SEC  = "#8b949e"
 BORDER    = "#30363d"
+TAB_ACT   = "#00c9a7"   # active tab highlight
+TAB_INACT = "#1c2230"   # inactive tab
 
 FONT_HEAD = ("Segoe UI", 26, "bold")
 FONT_CARD = ("Segoe UI", 15, "bold")
@@ -69,7 +77,7 @@ FONT_TINY = ("Segoe UI", 11)
 FONT_LBL  = ("Segoe UI", 12, "bold")
 
 
-# ─── Shared widget helpers ────────────────────────────────────────────────────
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def divider(parent):
     ctk.CTkFrame(parent, height=1, fg_color=BORDER, corner_radius=0).pack(fill="x")
@@ -107,6 +115,189 @@ def section_label(parent, text):
                  text_color=TEXT_SEC).pack(anchor="w", padx=18, pady=(14, 3))
 
 
+# ─── Summary Stats Input Widget ───────────────────────────────────────────────
+
+class SummaryStatsFrame(ctk.CTkFrame):
+    """
+    A compact frame with M / SD / N fields for summary-stats input mode.
+    SD field is hidden for one-sample when not needed, but kept for paired.
+    """
+    def __init__(self, parent, show_sd=True, **kw):
+        super().__init__(parent, fg_color="transparent", **kw)
+        self.show_sd = show_sd
+        self._build()
+
+    def _build(self):
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=(4, 8))
+
+        # Mean
+        m_lbl = ctk.CTkLabel(row, text="M", font=("Segoe UI", 11, "bold"),
+                              text_color=TEXT_SEC, width=18)
+        m_lbl.pack(side="left", padx=(0, 4))
+        self.mean_entry = styled_entry(row, placeholder="Mean", width=90, height=30)
+        self.mean_entry.pack(side="left", padx=(0, 10))
+
+        # SD
+        if self.show_sd:
+            sd_lbl = ctk.CTkLabel(row, text="SD", font=("Segoe UI", 11, "bold"),
+                                   text_color=TEXT_SEC, width=22)
+            sd_lbl.pack(side="left", padx=(0, 4))
+            self.sd_entry = styled_entry(row, placeholder="Std Dev", width=90, height=30)
+            self.sd_entry.pack(side="left", padx=(0, 10))
+        else:
+            self.sd_entry = None
+
+        # N
+        n_lbl = ctk.CTkLabel(row, text="N", font=("Segoe UI", 11, "bold"),
+                              text_color=TEXT_SEC, width=18)
+        n_lbl.pack(side="left", padx=(0, 4))
+        self.n_entry = styled_entry(row, placeholder="Sample size", width=80, height=30)
+        self.n_entry.pack(side="left")
+
+    def get_values(self):
+        """Returns (mean, sd, n) — sd may be None if not shown."""
+        m = float(self.mean_entry.get())
+        n = int(self.n_entry.get())
+        sd = float(self.sd_entry.get()) if self.sd_entry else None
+        return m, sd, n
+
+    def clear(self):
+        self.mean_entry.delete(0, "end")
+        if self.sd_entry:
+            self.sd_entry.delete(0, "end")
+        self.n_entry.delete(0, "end")
+
+
+# ─── Group Card Widget ────────────────────────────────────────────────────────
+
+class GroupCard(ctk.CTkFrame):
+    """
+    A reusable group/sample card with:
+      - Editable badge + name
+      - Mode toggle: Raw Data ↔ Summary Stats
+      - Textbox for raw data
+      - SummaryStatsFrame for M/SD/N
+    """
+    def __init__(self, parent, badge_text, badge_color, group_key,
+                 show_sd_in_summary=True, **kw):
+        super().__init__(parent, fg_color=BG_PANEL, corner_radius=8,
+                         border_width=1, border_color=BORDER, **kw)
+        self.badge_color = badge_color
+        self.group_key = group_key
+        self.show_sd_in_summary = show_sd_in_summary
+        self._mode = "raw"   # "raw" or "summary"
+        self._build(badge_text)
+
+    def _build(self, badge_text):
+        # ── Header row ──
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(10, 4))
+
+        self.badge = ctk.CTkEntry(header, width=80, height=28,
+                                   font=("Segoe UI", 10, "bold"),
+                                   fg_color=self.badge_color,
+                                   border_color=self.badge_color,
+                                   text_color="#0d1117", justify="center",
+                                   border_width=0, corner_radius=6)
+        self.badge.insert(0, badge_text)
+        self.badge.pack(side="left", padx=(0, 8))
+
+        self.name_entry = styled_entry(header, placeholder="Group name", height=28)
+        self.name_entry.insert(0, self.group_key)
+        self.name_entry.pack(side="left", fill="x", expand=True)
+
+        # ── Mode toggle tabs ──
+        tab_bar = ctk.CTkFrame(self, fg_color=BG_INPUT, corner_radius=6)
+        tab_bar.pack(fill="x", padx=12, pady=(2, 6))
+
+        self.raw_btn = ctk.CTkButton(
+            tab_bar, text="📋  Raw Data", height=26,
+            font=("Segoe UI", 11, "bold"),
+            fg_color=TAB_ACT, hover_color="#009e82",
+            text_color="#0d1117", corner_radius=5,
+            command=self._set_raw
+        )
+        self.raw_btn.pack(side="left", padx=(4, 2), pady=4, fill="x", expand=True)
+
+        self.sum_btn = ctk.CTkButton(
+            tab_bar, text="∑  Summary Stats", height=26,
+            font=("Segoe UI", 11, "bold"),
+            fg_color=TAB_INACT, hover_color=BORDER,
+            text_color=TEXT_SEC, corner_radius=5,
+            command=self._set_summary
+        )
+        self.sum_btn.pack(side="left", padx=(2, 4), pady=4, fill="x", expand=True)
+
+        # ── Raw data area ──
+        self.raw_frame = ctk.CTkFrame(self, fg_color="transparent")
+        ctk.CTkLabel(self.raw_frame, text="Data (comma-separated):",
+                     font=FONT_TINY, text_color=TEXT_SEC).pack(anchor="w", padx=12, pady=(2, 2))
+        self.data_text = ctk.CTkTextbox(self.raw_frame, height=80,
+                                         fg_color=BG_INPUT, text_color=TEXT_PRI,
+                                         border_width=1, border_color=BORDER,
+                                         font=FONT_BODY, corner_radius=6)
+        self.data_text.pack(fill="x", padx=12, pady=(0, 10))
+        self.raw_frame.pack(fill="x")
+
+        # ── Summary stats area (hidden initially) ──
+        self.sum_frame = ctk.CTkFrame(self, fg_color="transparent")
+        hint = "Enter your pre-computed statistics below:"
+        ctk.CTkLabel(self.sum_frame, text=hint,
+                     font=FONT_TINY, text_color=TEXT_SEC).pack(anchor="w", padx=12, pady=(2, 4))
+        self.stats_input = SummaryStatsFrame(self.sum_frame,
+                                              show_sd=self.show_sd_in_summary)
+        self.stats_input.pack(fill="x")
+        # Info note
+        note = ctk.CTkLabel(self.sum_frame,
+                             text="ℹ  Paired t-test requires same N for both groups",
+                             font=("Segoe UI", 10), text_color=WARN)
+        note.pack(anchor="w", padx=12, pady=(0, 6))
+        self._sum_note = note
+        self._sum_note.pack_forget()  # hide by default
+
+    def set_show_paired_note(self, show):
+        if show:
+            self._sum_note.pack(anchor="w", padx=12, pady=(0, 6))
+        else:
+            self._sum_note.pack_forget()
+
+    def _set_raw(self):
+        self._mode = "raw"
+        self.raw_btn.configure(fg_color=TAB_ACT, text_color="#0d1117")
+        self.sum_btn.configure(fg_color=TAB_INACT, text_color=TEXT_SEC)
+        self.sum_frame.pack_forget()
+        self.raw_frame.pack(fill="x")
+
+    def _set_summary(self):
+        self._mode = "summary"
+        self.sum_btn.configure(fg_color=ACCENT2, text_color="#0d1117")
+        self.raw_btn.configure(fg_color=TAB_INACT, text_color=TEXT_SEC)
+        self.raw_frame.pack_forget()
+        self.sum_frame.pack(fill="x")
+
+    @property
+    def mode(self):
+        return self._mode
+
+    def get_name(self):
+        return self.name_entry.get().strip() or self.group_key
+
+    def get_raw_data(self):
+        text = self.data_text.get("1.0", "end").strip()
+        text = re.sub(r'[,\n\r\t]+', ' ', text)
+        return [float(v) for v in re.findall(r'-?\d+\.?\d*', text)]
+
+    def get_summary(self):
+        """Returns (mean, sd, n). Raises ValueError on bad input."""
+        return self.stats_input.get_values()
+
+    def clear(self):
+        self.data_text.delete("1.0", "end")
+        self.stats_input.clear()
+        self._set_raw()
+
+
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 class Sidebar(ctk.CTkFrame):
@@ -117,7 +308,6 @@ class Sidebar(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Logo
         logo = ctk.CTkFrame(self, fg_color=ACCENT, corner_radius=0, height=64)
         logo.pack(fill="x"); logo.pack_propagate(False)
         ctk.CTkLabel(logo, text="  t  ", font=("Segoe UI", 30, "bold"),
@@ -130,7 +320,6 @@ class Sidebar(ctk.CTkFrame):
 
         divider(self)
 
-        # Test type selector
         section_label(self, "TEST TYPE")
         self.test_type_var = ctk.StringVar(value="independent")
         self.test_menu = ctk.CTkOptionMenu(
@@ -143,13 +332,11 @@ class Sidebar(ctk.CTkFrame):
         )
         self.test_menu.pack(fill="x", padx=14, pady=(0, 6))
 
-        # Alpha
         section_label(self, "ALPHA LEVEL")
         self.alpha_entry = styled_entry(self, placeholder="0.05")
         self.alpha_entry.insert(0, "0.05")
         self.alpha_entry.pack(fill="x", padx=14, pady=(0, 6))
 
-        # Researcher name
         section_label(self, "RESEARCHER NAME")
         self.researcher_entry = styled_entry(self, placeholder="e.g. Dr. John Smith")
         self.researcher_entry.pack(fill="x", padx=14, pady=(0, 6))
@@ -187,21 +374,18 @@ class Sidebar(ctk.CTkFrame):
                                      fg=DANGER, hover="#b91c1c")
         self.clear_btn.pack(**pad)
 
-        # Theme toggle
         divider(self)
         self.theme_btn = sidebar_btn(self, "☀️  Light Mode",
                                      fg="#374151", hover="#4b5563",
                                      font=FONT_BODY, height=32)
         self.theme_btn.pack(fill="x", padx=14, pady=8)
 
-        # Settings
         divider(self)
         self.settings_btn = sidebar_btn(self, "⚙   Settings",
                                         fg="#374151", hover="#4b5563",
                                         font=FONT_BODY, height=32)
         self.settings_btn.pack(fill="x", padx=14, pady=8)
 
-        # Status / footer
         self.status_label = ctk.CTkLabel(self, text="", font=FONT_TINY,
                                           text_color=ACCENT, fg_color=BG_CARD,
                                           wraplength=200)
@@ -214,7 +398,7 @@ class TTestApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("t-Test Analysis")
-        self.geometry("1220x800")
+        self.geometry("1280x820")
         self.minsize(1100, 700)
         self.configure(fg_color=BG_DEEP)
 
@@ -228,11 +412,9 @@ class TTestApp(ctk.CTk):
     # ── UI Build ──────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Sidebar
         self.sidebar = Sidebar(self)
         self.sidebar.pack(side="left", fill="y")
 
-        # Wire sidebar
         self.sidebar.test_menu.configure(command=self._on_test_change)
         self.sidebar.import_btn.configure(command=self.import_data)
         self.sidebar.preview_btn.configure(command=self.show_preview)
@@ -243,15 +425,13 @@ class TTestApp(ctk.CTk):
         self.sidebar.theme_btn.configure(command=self.toggle_theme)
         self.sidebar.settings_btn.configure(command=self.open_settings)
 
-        # Content area
         content = ctk.CTkFrame(self, fg_color=BG_DEEP, corner_radius=0)
         content.pack(side="left", fill="both", expand=True)
 
-        # ── Header bar ────────────────────────────────────────────────────────
+        # Header
         header = ctk.CTkFrame(content, fg_color=BG_CARD, corner_radius=0, height=64)
         header.pack(fill="x"); header.pack_propagate(False)
 
-        # LEFT side: Title + Subtitle entries
         meta = ctk.CTkFrame(header, fg_color=BG_CARD)
         meta.pack(side="left", padx=16)
 
@@ -266,11 +446,10 @@ class TTestApp(ctk.CTk):
         self.subtitle_entry.insert(0, "t-Test")
         self.subtitle_entry.grid(row=0, column=3, padx=4)
 
-        # RIGHT side: App name as subtitle label
         ctk.CTkLabel(header, text="t-Test Analysis",
                      font=("Segoe UI", 13), text_color=TEXT_SEC).pack(side="right", padx=24)
 
-        # ── Body: resizable two-column ────────────────────────────────────────
+        # Body pane
         import tkinter as tk
         from tkinter import ttk
 
@@ -279,20 +458,17 @@ class TTestApp(ctk.CTk):
 
         style = ttk.Style()
         style.theme_use("default")
-        style.configure("Sash", sashthickness=6, sashrelief="flat",
-                        background="#30363d")
+        style.configure("Sash", sashthickness=6, sashrelief="flat", background="#30363d")
 
         pane = ttk.PanedWindow(outer, orient=tk.HORIZONTAL)
         pane.pack(fill="both", expand=True)
 
-        # LEFT
         left_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         left = card(left_wrap, title="📋  Data Input")
         left.pack(fill="both", expand=True)
         self._build_input_panel(left)
         pane.add(left_wrap, weight=1)
 
-        # RIGHT
         right_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         right = card(right_wrap, title="📊  Analysis Results")
         right.pack(fill="both", expand=True)
@@ -306,7 +482,7 @@ class TTestApp(ctk.CTk):
                 pane.unbind("<Configure>")
         pane.bind("<Configure>", _set_sash)
 
-        # ── Status bar ────────────────────────────────────────────────────────
+        # Status bar
         bar = ctk.CTkFrame(content, fg_color=BG_CARD, height=28, corner_radius=0)
         bar.pack(fill="x", side="bottom"); bar.pack_propagate(False)
         self.file_label = ctk.CTkLabel(bar, text="No file saved yet",
@@ -317,84 +493,41 @@ class TTestApp(ctk.CTk):
         self.stat_label.pack(side="right", padx=12)
 
     def _build_input_panel(self, parent):
-        scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD,
-                                         scrollbar_button_color=BORDER)
-        scroll.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.scroll = ctk.CTkScrollableFrame(parent, fg_color=BG_CARD,
+                                              scrollbar_button_color=BORDER)
+        self.scroll.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        # ── Test value (one-sample) ──
-        self.test_val_frame = ctk.CTkFrame(scroll, fg_color=BG_PANEL,
+        # ── Test value (one-sample only) ──
+        self.test_val_frame = ctk.CTkFrame(self.scroll, fg_color=BG_PANEL,
                                             corner_radius=8, border_width=1,
                                             border_color=BORDER)
         ctk.CTkLabel(self.test_val_frame, text="TEST VALUE  (μ₀)",
                      font=("Segoe UI", 11, "bold"), text_color=TEXT_SEC).pack(
             anchor="w", padx=12, pady=(10, 3))
-        self.test_value_entry = styled_entry(self.test_val_frame, placeholder="0", width=120)
+        self.test_value_entry = styled_entry(self.test_val_frame,
+                                              placeholder="0", width=120)
         self.test_value_entry.insert(0, "0")
         self.test_value_entry.pack(anchor="w", padx=12, pady=(0, 10))
 
-        # ── Group 1 ──
-        self.g1_frame = ctk.CTkFrame(scroll, fg_color=BG_PANEL,
-                                      corner_radius=8, border_width=1,
-                                      border_color=BORDER)
-        self.g1_frame.pack(fill="x", pady=(0, 8))
+        # ── Group 1 card ──
+        self.g1_card = GroupCard(self.scroll,
+                                  badge_text="Group 1",
+                                  badge_color=ACCENT,
+                                  group_key="Group_1",
+                                  show_sd_in_summary=True)
+        self.g1_card.pack(fill="x", pady=(0, 8))
 
-        g1_header = ctk.CTkFrame(self.g1_frame, fg_color="transparent")
-        g1_header.pack(fill="x", padx=12, pady=(10, 4))
+        # ── Group 2 card ──
+        self.g2_card = GroupCard(self.scroll,
+                                  badge_text="Group 2",
+                                  badge_color=ACCENT2,
+                                  group_key="Group_2",
+                                  show_sd_in_summary=True)
 
-        # Editable badge
-        self.g1_badge = ctk.CTkEntry(g1_header, width=80, height=28,
-                                      font=("Segoe UI", 10, "bold"),
-                                      fg_color=ACCENT, border_color=ACCENT,
-                                      text_color="#0d1117", justify="center",
-                                      border_width=0, corner_radius=6)
-        self.g1_badge.insert(0, "Group 1")
-        self.g1_badge.pack(side="left", padx=(0, 8))
-
-        self.g1_name = styled_entry(g1_header, placeholder="Group name", height=28)
-        self.g1_name.insert(0, "Group_1")
-        self.g1_name.pack(side="left", fill="x", expand=True)
-
-        ctk.CTkLabel(self.g1_frame, text="Data (comma-separated):",
-                     font=FONT_TINY, text_color=TEXT_SEC).pack(anchor="w", padx=12, pady=(2, 2))
-        self.g1_text = ctk.CTkTextbox(self.g1_frame, height=80,
-                                       fg_color=BG_INPUT, text_color=TEXT_PRI,
-                                       border_width=1, border_color=BORDER,
-                                       font=FONT_BODY, corner_radius=6)
-        self.g1_text.pack(fill="x", padx=12, pady=(0, 12))
-
-        # ── Group 2 ──
-        self.g2_frame = ctk.CTkFrame(scroll, fg_color=BG_PANEL,
-                                      corner_radius=8, border_width=1,
-                                      border_color=BORDER)
-
-        g2_header = ctk.CTkFrame(self.g2_frame, fg_color="transparent")
-        g2_header.pack(fill="x", padx=12, pady=(10, 4))
-
-        self.g2_badge = ctk.CTkEntry(g2_header, width=80, height=28,
-                                      font=("Segoe UI", 10, "bold"),
-                                      fg_color=ACCENT2, border_color=ACCENT2,
-                                      text_color="#0d1117", justify="center",
-                                      border_width=0, corner_radius=6)
-        self.g2_badge.insert(0, "Group 2")
-        self.g2_badge.pack(side="left", padx=(0, 8))
-
-        self.g2_name = styled_entry(g2_header, placeholder="Group name", height=28)
-        self.g2_name.insert(0, "Group_2")
-        self.g2_name.pack(side="left", fill="x", expand=True)
-
-        ctk.CTkLabel(self.g2_frame, text="Data (comma-separated):",
-                     font=FONT_TINY, text_color=TEXT_SEC).pack(anchor="w", padx=12, pady=(2, 2))
-        self.g2_text = ctk.CTkTextbox(self.g2_frame, height=80,
-                                       fg_color=BG_INPUT, text_color=TEXT_PRI,
-                                       border_width=1, border_color=BORDER,
-                                       font=FONT_BODY, corner_radius=6)
-        self.g2_text.pack(fill="x", padx=12, pady=(0, 12))
-
-        # ── Preview panel (hidden by default) ──
-        self.preview_card = ctk.CTkFrame(scroll, fg_color=BG_PANEL,
+        # ── Preview panel ──
+        self.preview_card = ctk.CTkFrame(self.scroll, fg_color=BG_PANEL,
                                           corner_radius=8, border_width=1,
                                           border_color=BORDER)
-
         ph = ctk.CTkFrame(self.preview_card, fg_color="transparent")
         ph.pack(fill="x", padx=12, pady=(8, 4))
         ctk.CTkLabel(ph, text="DATA PREVIEW", font=("Segoe UI", 11, "bold"),
@@ -421,29 +554,29 @@ class TTestApp(ctk.CTk):
     # ── Test-type switching ────────────────────────────────────────────────────
 
     def _on_test_change(self, choice):
-        # Reset packs
         self.test_val_frame.pack_forget()
-        self.g2_frame.pack_forget()
+        self.g2_card.pack_forget()
 
         if choice == "one-sample":
-            self.test_val_frame.pack(fill="x", pady=(0, 8),
-                                     in_=self.g1_frame.master)
-            self.g1_badge.delete(0, "end"); self.g1_badge.insert(0, "Sample")
-            self.g1_badge.configure(fg_color=ACCENT, border_color=ACCENT)
+            self.test_val_frame.pack(fill="x", pady=(0, 8), in_=self.scroll)
+            self.g1_card.badge.delete(0, "end"); self.g1_card.badge.insert(0, "Sample")
+            self.g1_card.badge.configure(fg_color=ACCENT, border_color=ACCENT)
+            # one-sample from summary only needs M + N (no SD needed for test,
+            # but we keep SD for Cohen's d display)
         elif choice == "paired":
-            self.g1_badge.delete(0, "end"); self.g1_badge.insert(0, "Pre")
-            self.g1_badge.configure(fg_color=ACCENT, border_color=ACCENT)
-            self.g2_badge.delete(0, "end"); self.g2_badge.insert(0, "Post")
-            self.g2_badge.configure(fg_color=ACCENT2, border_color=ACCENT2)
-            self.g2_frame.pack(fill="x", pady=(0, 8),
-                               in_=self.g1_frame.master)
+            self.g1_card.badge.delete(0, "end"); self.g1_card.badge.insert(0, "Pre")
+            self.g1_card.badge.configure(fg_color=ACCENT, border_color=ACCENT)
+            self.g2_card.badge.delete(0, "end"); self.g2_card.badge.insert(0, "Post")
+            self.g2_card.badge.configure(fg_color=ACCENT2, border_color=ACCENT2)
+            self.g2_card.set_show_paired_note(True)
+            self.g2_card.pack(fill="x", pady=(0, 8), in_=self.scroll)
         else:  # independent
-            self.g1_badge.delete(0, "end"); self.g1_badge.insert(0, "Group 1")
-            self.g1_badge.configure(fg_color=ACCENT, border_color=ACCENT)
-            self.g2_badge.delete(0, "end"); self.g2_badge.insert(0, "Group 2")
-            self.g2_badge.configure(fg_color=ACCENT2, border_color=ACCENT2)
-            self.g2_frame.pack(fill="x", pady=(0, 8),
-                               in_=self.g1_frame.master)
+            self.g1_card.badge.delete(0, "end"); self.g1_card.badge.insert(0, "Group 1")
+            self.g1_card.badge.configure(fg_color=ACCENT, border_color=ACCENT)
+            self.g2_card.badge.delete(0, "end"); self.g2_card.badge.insert(0, "Group 2")
+            self.g2_card.badge.configure(fg_color=ACCENT2, border_color=ACCENT2)
+            self.g2_card.set_show_paired_note(False)
+            self.g2_card.pack(fill="x", pady=(0, 8), in_=self.scroll)
 
     # ── Import ────────────────────────────────────────────────────────────────
 
@@ -459,17 +592,19 @@ class TTestApp(ctk.CTk):
 
             if len(df.columns) >= 1:
                 d1 = df.iloc[:, 0].dropna().tolist()
-                self.g1_text.delete("1.0", "end")
-                self.g1_text.insert("1.0", ", ".join(map(str, d1)))
-                self.g1_name.delete(0, "end")
-                self.g1_name.insert(0, str(df.columns[0]))
+                self.g1_card.data_text.delete("1.0", "end")
+                self.g1_card.data_text.insert("1.0", ", ".join(map(str, d1)))
+                self.g1_card.name_entry.delete(0, "end")
+                self.g1_card.name_entry.insert(0, str(df.columns[0]))
+                self.g1_card._set_raw()
 
             if len(df.columns) >= 2 and self.sidebar.test_type_var.get() != "one-sample":
                 d2 = df.iloc[:, 1].dropna().tolist()
-                self.g2_text.delete("1.0", "end")
-                self.g2_text.insert("1.0", ", ".join(map(str, d2)))
-                self.g2_name.delete(0, "end")
-                self.g2_name.insert(0, str(df.columns[1]))
+                self.g2_card.data_text.delete("1.0", "end")
+                self.g2_card.data_text.insert("1.0", ", ".join(map(str, d2)))
+                self.g2_card.name_entry.delete(0, "end")
+                self.g2_card.name_entry.insert(0, str(df.columns[1]))
+                self.g2_card._set_raw()
 
             self.sidebar.preview_btn.configure(state="normal")
             self.sidebar.status_label.configure(
@@ -482,9 +617,7 @@ class TTestApp(ctk.CTk):
     def show_preview(self):
         if self.imported_data is None:
             messagebox.showinfo("No Data", "Import a file first."); return
-
-        self.preview_card.pack(fill="x", pady=(0, 8),
-                               in_=self.g1_frame.master)
+        self.preview_card.pack(fill="x", pady=(0, 8), in_=self.scroll)
         self.preview_text.configure(state="normal")
         self.preview_text.delete("1.0", "end")
         df = self.imported_data
@@ -497,7 +630,7 @@ class TTestApp(ctk.CTk):
     def hide_preview(self):
         self.preview_card.pack_forget()
 
-    # ── Parsing ───────────────────────────────────────────────────────────────
+    # ── Parsing & formatting ──────────────────────────────────────────────────
 
     def _parse(self, text):
         text = re.sub(r'[,\n\r\t]+', ' ', text)
@@ -511,7 +644,7 @@ class TTestApp(ctk.CTk):
         s = f"{p:.3f}"
         return ("." + s[2:]) if s.startswith("0.") else s
 
-    # ── Analysis ──────────────────────────────────────────────────────────────
+    # ── Analysis dispatch ─────────────────────────────────────────────────────
 
     def run_analysis(self):
         try:
@@ -524,32 +657,16 @@ class TTestApp(ctk.CTk):
         self.alpha = alpha
         ttype = self.sidebar.test_type_var.get()
 
-        g1_raw = self.g1_text.get("1.0", "end").strip()
-        if not g1_raw:
-            messagebox.showerror("Error", "Enter data for the first group/sample"); return
-        g1 = self._parse(g1_raw)
-        if len(g1) < 2:
-            messagebox.showerror("Error", "Need at least 2 values"); return
-
-        g1_name = self.g1_name.get().strip() or "Group_1"
-
-        if ttype == "one-sample":
-            self.results = self._one_sample(g1, g1_name)
-        else:
-            g2_raw = self.g2_text.get("1.0", "end").strip()
-            if not g2_raw:
-                messagebox.showerror("Error", "Enter data for the second group"); return
-            g2 = self._parse(g2_raw)
-            if len(g2) < 2:
-                messagebox.showerror("Error", "Second group needs ≥ 2 values"); return
-            g2_name = self.g2_name.get().strip() or "Group_2"
-
-            if ttype == "paired":
-                if len(g1) != len(g2):
-                    messagebox.showerror("Error", "Paired samples must have equal size"); return
-                self.results = self._paired(g1, g2, g1_name, g2_name)
+        try:
+            if ttype == "one-sample":
+                self.results = self._run_one_sample()
+            elif ttype == "independent":
+                self.results = self._run_independent()
             else:
-                self.results = self._independent(g1, g2, g1_name, g2_name)
+                self.results = self._run_paired()
+        except Exception as e:
+            messagebox.showerror("Input Error", str(e))
+            return
 
         self._display_results()
         self.sidebar.pdf_btn.configure(state="normal")
@@ -560,45 +677,153 @@ class TTestApp(ctk.CTk):
                  f"{'✓ Significant' if r['p_value'] < r['alpha'] else '✗ Not Significant'}"
         )
 
-    def _one_sample(self, data, name):
+    def _get_group_data_or_summary(self, card, label="Group"):
+        """
+        Returns a dict with mode + stats extracted from the card.
+        mode='raw'     → {'mode':'raw','data':[...]}
+        mode='summary' → {'mode':'summary','mean':m,'sd':sd,'n':n}
+        """
+        if card.mode == "raw":
+            data = card.get_raw_data()
+            if len(data) < 2:
+                raise ValueError(f"{label}: Need at least 2 values in Raw Data mode.")
+            return {"mode": "raw", "data": data}
+        else:
+            try:
+                m, sd, n = card.get_summary()
+            except (ValueError, TypeError):
+                raise ValueError(
+                    f"{label}: Please fill in M, SD, and N (all must be valid numbers).")
+            if n < 2:
+                raise ValueError(f"{label}: N must be at least 2.")
+            if sd is not None and sd < 0:
+                raise ValueError(f"{label}: SD cannot be negative.")
+            return {"mode": "summary", "mean": m, "sd": sd, "n": int(n)}
+
+    # ── One-sample ────────────────────────────────────────────────────────────
+
+    def _run_one_sample(self):
         try: tv = float(self.test_value_entry.get())
         except ValueError: tv = 0
-        n = len(data); m = np.mean(data); s = np.std(data, ddof=1)
-        t, p = stats.ttest_1samp(data, tv)
+
+        info = self._get_group_data_or_summary(self.g1_card, "Sample")
+        name = self.g1_card.get_name()
+
+        if info["mode"] == "raw":
+            data = info["data"]
+            n = len(data); m = np.mean(data); s = np.std(data, ddof=1)
+            t, p = stats.ttest_1samp(data, tv)
+        else:
+            # Summary stats path
+            m, s, n = info["mean"], info["sd"], info["n"]
+            if s is None or s == 0:
+                raise ValueError("SD is required (and must be > 0) for one-sample summary input.")
+            se = s / np.sqrt(n)
+            t = (m - tv) / se
+            df_val = n - 1
+            p = 2 * stats.t.sf(abs(t), df_val)
+
         return dict(test_type="one-sample", test_name="One-Sample t-Test",
-                    group1_name=name, group1_data=data, test_value=tv,
+                    group1_name=name, test_value=tv,
                     n=n, mean=m, std=s, se=s/np.sqrt(n),
                     t_statistic=t, df=n-1, p_value=p,
-                    cohens_d=(m-tv)/s, alpha=self.alpha)
+                    cohens_d=(m-tv)/s, alpha=self.alpha,
+                    input_mode=info["mode"])
 
-    def _independent(self, d1, d2, n1, n2):
-        n_1, n_2 = len(d1), len(d2)
-        m1, m2 = np.mean(d1), np.mean(d2)
-        s1, s2 = np.std(d1, ddof=1), np.std(d2, ddof=1)
-        t, p = stats.ttest_ind(d1, d2, equal_var=False)
-        v1, v2 = s1**2, s2**2
-        df = ((v1/n_1 + v2/n_2)**2) / ((v1/n_1)**2/(n_1-1) + (v2/n_2)**2/(n_2-1))
-        ps = np.sqrt(((n_1-1)*s1**2 + (n_2-1)*s2**2) / (n_1+n_2-2))
+    # ── Independent ───────────────────────────────────────────────────────────
+
+    def _run_independent(self):
+        info1 = self._get_group_data_or_summary(self.g1_card, "Group 1")
+        info2 = self._get_group_data_or_summary(self.g2_card, "Group 2")
+        name1 = self.g1_card.get_name()
+        name2 = self.g2_card.get_name()
+
+        # Determine stats for each group
+        if info1["mode"] == "raw":
+            d1 = info1["data"]
+            n1 = len(d1); m1 = np.mean(d1); s1 = np.std(d1, ddof=1)
+        else:
+            m1, s1, n1 = info1["mean"], info1["sd"], info1["n"]
+            if s1 is None: raise ValueError("Group 1: SD is required for summary input.")
+
+        if info2["mode"] == "raw":
+            d2 = info2["data"]
+            n2 = len(d2); m2 = np.mean(d2); s2 = np.std(d2, ddof=1)
+        else:
+            m2, s2, n2 = info2["mean"], info2["sd"], info2["n"]
+            if s2 is None: raise ValueError("Group 2: SD is required for summary input.")
+
+        # Welch's t-test from summary stats
+        se1_sq = (s1**2) / n1
+        se2_sq = (s2**2) / n2
+        t = (m1 - m2) / np.sqrt(se1_sq + se2_sq)
+        df_val = (se1_sq + se2_sq)**2 / (se1_sq**2/(n1-1) + se2_sq**2/(n2-1))
+        p = 2 * stats.t.sf(abs(t), df_val)
+
+        ps = np.sqrt(((n1-1)*s1**2 + (n2-1)*s2**2) / (n1+n2-2))
+        cohens_d = (m1 - m2) / ps
+
         return dict(test_type="independent",
                     test_name="Independent Samples t-Test (Welch's)",
-                    group1_name=n1, group2_name=n2,
-                    group1_data=d1, group2_data=d2,
-                    n1=n_1, n2=n_2, mean1=m1, mean2=m2, std1=s1, std2=s2,
-                    se1=s1/np.sqrt(n_1), se2=s2/np.sqrt(n_2),
-                    t_statistic=t, df=df, p_value=p,
-                    cohens_d=(m1-m2)/ps, alpha=self.alpha)
+                    group1_name=name1, group2_name=name2,
+                    n1=n1, n2=n2, mean1=m1, mean2=m2, std1=s1, std2=s2,
+                    se1=s1/np.sqrt(n1), se2=s2/np.sqrt(n2),
+                    t_statistic=t, df=df_val, p_value=p,
+                    cohens_d=cohens_d, alpha=self.alpha,
+                    input_mode=f"G1:{info1['mode']} / G2:{info2['mode']}")
 
-    def _paired(self, d1, d2, n1, n2):
-        n = len(d1); m1, m2 = np.mean(d1), np.mean(d2)
-        diff = np.array(d1) - np.array(d2)
-        md, sd = np.mean(diff), np.std(diff, ddof=1)
-        t, p = stats.ttest_rel(d1, d2)
+    # ── Paired ────────────────────────────────────────────────────────────────
+
+    def _run_paired(self):
+        info1 = self._get_group_data_or_summary(self.g1_card, "Pre")
+        info2 = self._get_group_data_or_summary(self.g2_card, "Post")
+        name1 = self.g1_card.get_name()
+        name2 = self.g2_card.get_name()
+
+        both_raw = info1["mode"] == "raw" and info2["mode"] == "raw"
+
+        if both_raw:
+            d1, d2 = info1["data"], info2["data"]
+            if len(d1) != len(d2):
+                raise ValueError("Paired samples must have equal size.")
+            n = len(d1); m1, m2 = np.mean(d1), np.mean(d2)
+            diff = np.array(d1) - np.array(d2)
+            md, sd = np.mean(diff), np.std(diff, ddof=1)
+            t, p = stats.ttest_rel(d1, d2)
+        elif info1["mode"] == "summary" and info2["mode"] == "summary":
+            # Summary stats for paired: requires correlation or SD of difference.
+            # We use a simplified approach: ask for SD of difference via sd_diff_entry.
+            # For now, compute approximate using SD of difference if both groups have
+            # same N. We prompt the user that SD here = SD of differences.
+            m1, s1, n1 = info1["mean"], info1["sd"], info1["n"]
+            m2, s2, n2 = info2["mean"], info2["sd"], info2["n"]
+            if n1 != n2:
+                raise ValueError("Paired t-test: Both groups must have the same N.")
+            if s1 is None or s2 is None:
+                raise ValueError("Both groups need SD filled in.\n"
+                                 "For paired summary mode, enter SD of each time point.\n"
+                                 "Note: SD fields are used as SD of Pre and SD of Post.")
+            n = n1
+            md = m1 - m2
+            # Without raw data or SD of diff, we can't compute exact paired t.
+            # We inform the user and use a conservative estimate.
+            raise ValueError(
+                "⚠  Paired t-test from Summary Stats requires the\n"
+                "SD of the DIFFERENCES (not SD of each group).\n\n"
+                "Please use Raw Data mode for paired tests, OR\n"
+                "enter your data as: Group 1 = differences (Pre−Post),\n"
+                "then use One-Sample t-test with test value = 0."
+            )
+        else:
+            raise ValueError("Paired t-test: Both groups must use the same input mode\n"
+                             "(either both Raw Data, or see the note above for summary).")
+
         return dict(test_type="paired", test_name="Paired Samples t-Test",
-                    group1_name=n1, group2_name=n2,
-                    group1_data=d1, group2_data=d2,
+                    group1_name=name1, group2_name=name2,
                     n=n, mean1=m1, mean2=m2, mean_diff=md, std_diff=sd,
                     se_diff=sd/np.sqrt(n), t_statistic=t, df=n-1, p_value=p,
-                    cohens_d=md/sd, alpha=self.alpha)
+                    cohens_d=md/sd, alpha=self.alpha,
+                    input_mode="raw")
 
     # ── Display ───────────────────────────────────────────────────────────────
 
@@ -619,7 +844,10 @@ class TTestApp(ctk.CTk):
         out += f"{'═'*54}\n\n"
 
         out += f"{r['test_name'].upper()}\n{line}\n"
-        out += f"α = {r['alpha']}   Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        out += f"α = {r['alpha']}   Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        if 'input_mode' in r:
+            out += f"Input mode: {r['input_mode']}\n"
+        out += "\n"
 
         out += f"DESCRIPTIVE STATISTICS\n{line}\n"
         if r['test_type'] == 'one-sample':
@@ -631,7 +859,7 @@ class TTestApp(ctk.CTk):
         else:
             out += f"{r['group1_name']}:  M = {r['mean1']:.2f},  N = {r['n']}\n"
             out += f"{r['group2_name']}:  M = {r['mean2']:.2f},  N = {r['n']}\n"
-            out += f"Mean Diff:  {r['mean_diff']:.2f},  SD = {r['std_diff']:.2f}\n\n"
+            out += f"Mean Diff:  {r['mean_diff']:.2f},  SD(diff) = {r['std_diff']:.2f}\n\n"
 
         out += f"TEST STATISTICS\n{line}\n"
         out += f"t  = {r['t_statistic']:.4f}\n"
@@ -675,7 +903,7 @@ class TTestApp(ctk.CTk):
                     f"mean difference = {r['mean_diff']:.2f}, "
                     f"t({r['df']:.0f}) = {r['t_statistic']:.2f}, p {pf}, d = {r['cohens_d']:.2f}.")
 
-    # ── Theme toggle ──────────────────────────────────────────────────────────
+    # ── Theme ─────────────────────────────────────────────────────────────────
 
     def toggle_theme(self):
         if self.dark_mode:
@@ -722,6 +950,8 @@ class TTestApp(ctk.CTk):
             story.append(Paragraph(r['test_name'], styles['Title']))
             story.append(Spacer(1, 0.15*inch))
             story.append(Paragraph(f"Alpha: α = {r['alpha']}", styles['Normal']))
+            if 'input_mode' in r:
+                story.append(Paragraph(f"Input mode: {r['input_mode']}", styles['Normal']))
             story.append(Spacer(1, 0.25*inch))
 
             tbl_style = TableStyle([
@@ -789,9 +1019,6 @@ class TTestApp(ctk.CTk):
         if not fp: return
 
         try:
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
-
             doc = Document()
             for section in doc.sections:
                 section.top_margin    = Inches(0.75)
@@ -829,7 +1056,6 @@ class TTestApp(ctk.CTk):
                 run = p.add_run(text)
                 run.font.size = Pt(size); run.bold = bold
 
-            # Title
             if ct:
                 h = doc.add_heading(ct.upper(), 0); h.alignment = WD_ALIGN_PARAGRAPH.CENTER
             if cs:
@@ -841,9 +1067,10 @@ class TTestApp(ctk.CTk):
 
             doc.add_heading(r['test_name'], 1)
             doc.add_paragraph(f"Alpha: α = {r['alpha']}")
+            if 'input_mode' in r:
+                doc.add_paragraph(f"Input mode: {r['input_mode']}")
             doc.add_paragraph()
 
-            # Descriptive stats table
             doc.add_heading('Descriptive Statistics', 2)
             if r['test_type'] == 'one-sample':
                 dt = doc.add_table(rows=2, cols=4); apa_borders(dt); hdr_sep(dt)
@@ -878,7 +1105,6 @@ class TTestApp(ctk.CTk):
 
             doc.add_paragraph()
 
-            # Test stats table
             doc.add_heading('Test Statistics', 2)
             st = doc.add_table(rows=5, cols=2); apa_borders(st); hdr_sep(st)
             for i, h in enumerate(["Statistic","Value"]):
@@ -894,14 +1120,12 @@ class TTestApp(ctk.CTk):
 
             doc.add_paragraph()
 
-            # Decision
             doc.add_heading('Decision', 2)
             if r['p_value'] < r['alpha']:
                 doc.add_paragraph(f"Reject the null hypothesis (p {self._fmt_p(r['p_value'])} < α = {r['alpha']}).")
             else:
                 doc.add_paragraph(f"Fail to reject the null hypothesis (p {self._fmt_p(r['p_value'])} ≥ α = {r['alpha']}).")
 
-            # Interpretation
             doc.add_heading('Interpretation', 2)
             doc.add_paragraph(self._interpretation())
 
@@ -918,12 +1142,16 @@ class TTestApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Error", f"Export failed:\n{e}")
 
-    # ── Clear ─────────────────────────────────────────────────────────────────
+    # ── Settings & Clear ─────────────────────────────────────────────────────
 
     def open_settings(self):
-        SettingsWindow(self, self)
+        if SETTINGS_AVAILABLE:
+            SettingsWindow(self, self)
+        else:
+            messagebox.showinfo("Settings", "app_settings module not found.")
 
     def apply_settings(self):
+        if not SETTINGS_AVAILABLE: return
         sm = SettingsManager()
         fb, fc, fh, fm, fbt, ft = sm.fonts
         ff = sm.font_family
@@ -935,10 +1163,10 @@ class TTestApp(ctk.CTk):
         self.sidebar.configure(width=sm.sidebar_width)
 
     def clear_fields(self):
-        self.g1_text.delete("1.0", "end")
-        self.g2_text.delete("1.0", "end")
-        self.g1_name.delete(0, "end"); self.g1_name.insert(0, "Group_1")
-        self.g2_name.delete(0, "end"); self.g2_name.insert(0, "Group_2")
+        self.g1_card.clear()
+        self.g2_card.clear()
+        self.g1_card.name_entry.delete(0, "end"); self.g1_card.name_entry.insert(0, "Group_1")
+        self.g2_card.name_entry.delete(0, "end"); self.g2_card.name_entry.insert(0, "Group_2")
         self.title_entry.delete(0, "end")
         self.subtitle_entry.delete(0, "end"); self.subtitle_entry.insert(0, "t-Test")
         self.results_text.configure(state="normal")
