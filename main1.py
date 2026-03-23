@@ -29,6 +29,9 @@ from modules import spearman_correlation
 from modules import cohen_kappa
 from modules import chi_square_test
 from modules import regression_analysis
+from modules import pearson_r_module
+from modules import tally_module
+from modules import kr20_reliability_app
 
 # Import database module
 try:
@@ -86,15 +89,20 @@ class MainMenuApp(ctk.CTk):
         
         # Configure main window
         self.title("Statistical Analysis Suite (Database Enabled)")
-        self.geometry("1100x900")  # Larger for 3x3 grid
+        self.geometry("920x680")
         self.resizable(True, True)
         
         # Set minimum size
-        self.minsize(1000, 850)  # Adjusted for grid layout
+        self.minsize(860, 620)
         
         # Center window on screen
         self.center_window()
         
+        # Database state
+        self.db_path = os.path.join(os.path.dirname(__file__), "stats_app.db")
+        self.database_ready = False
+        self.db_stats = {}
+
         # Initialize database
         if DATABASE_AVAILABLE:
             self.init_database()
@@ -114,10 +122,12 @@ class MainMenuApp(ctk.CTk):
     def init_database(self):
         """Initialize the database system"""
         try:
-            database.initialize_database()
-            self.db_stats = database.get_database_stats()
+            database.initialize_database(self.db_path)
+            self.db_stats = database.get_database_stats(self.db_path)
+            self.database_ready = True
         except Exception as e:
             print(f"Database initialization error: {e}")
+            self.database_ready = False
             self.db_stats = {}
         
     def create_ui(self):
@@ -161,7 +171,7 @@ class MainMenuApp(ctk.CTk):
         subtitle_label.pack(pady=(0, 20))
         
         # Database status indicator
-        if DATABASE_AVAILABLE:
+        if self.database_ready:
             db_status = ctk.CTkFrame(main_scroll, fg_color="#2e7d32", corner_radius=8)
             db_status.pack(fill="x", pady=(0, 15))
             
@@ -173,106 +183,76 @@ class MainMenuApp(ctk.CTk):
                 text_color="white"
             ).pack(pady=8)
         
-        # Modules section header
+        # Modules section: single combo launcher
         modules_label = ctk.CTkLabel(
             main_scroll,
             text="Select Analysis Tool:",
             font=ctk.CTkFont(size=18, weight="bold")
         )
-        modules_label.pack(anchor="w", pady=(10, 15))
-    
-        # Create grid container
-        grid_container = ctk.CTkFrame(main_scroll, fg_color="transparent")
-        grid_container.pack(fill="both", expand=True, pady=(0, 10))
-        
-        # Configure grid columns (3 columns)
-        for i in range(3):
-            grid_container.grid_columnconfigure(i, weight=1, uniform="column")
-        
-        # Define modules (now 9 for full 3x3 grid)
-        modules = [
-            {
-                "name": "ANOVA",
-                "full_name": "One-Way ANOVA",
-                "description": "Compare means across groups",
-                "icon": "📊",
-                "command": self.launch_anova,
-                "color": "#2e7d32"
-            },
-            {
-                "name": "Cronbach's α",
-                "full_name": "Cronbach's Alpha",
-                "description": "Internal consistency test",
-                "icon": "📈",
-                "command": self.launch_cronbach,
-                "color": "#1976d2"
-            },
-            {
-                "name": "t-Test",
-                "full_name": "Independent t-test",
-                "description": "Compare two groups",
-                "icon": "📉",
-                "command": self.launch_ttest,
-                "color": "#d32f2f"
-            },
-            {
-                "name": "Correlation",
-                "full_name": "Spearman's Correlation",
-                "description": "Rank-order relationships",
-                "icon": "🔗",
-                "command": self.launch_spearman,
-                "color": "#7b1fa2"
-            },
-            {
-                "name": "Kappa",
-                "full_name": "Cohen's Kappa",
-                "description": "Inter-rater agreement",
-                "icon": "🤝",
-                "command": self.launch_kappa,
-                "color": "#f57c00"
-            },
-            {
-                "name": "Chi-Square",
-                "full_name": "Chi-Square Test",
-                "description": "Categorical analysis",
-                "icon": "✕",
-                "command": self.launch_chi_square,
-                "color": "#e64a19"
-            },
-            {
-                "name": "Regression",
-                "full_name": "Regression Analysis",
-                "description": "Linear & multiple models",
-                "icon": "📐",
-                "command": self.launch_regression,
-                "color": "#388e3c"
-            },
-            {
-                "name": "Coming Soon",
-                "full_name": "More Tools",
-                "description": "Additional analyses",
-                "icon": "🔧",
-                "command": lambda: messagebox.showinfo("Coming Soon", "More statistical tools will be added in future updates!"),
-                "color": "#607d8b"
-            },
-            {
-                "name": "Help & Docs",
-                "full_name": "Documentation",
-                "description": "User guide & tutorials",
-                "icon": "📚",
-                "command": self.show_help,
-                "color": "#455a64"
-            }
-        ]
-        
-        # Create 3x3 grid of cards
-        for idx, module in enumerate(modules):
-            row = idx // 3
-            col = idx % 3
-            self.create_module_card(grid_container, module, row, col)
+        modules_label.pack(anchor="w", pady=(10, 12))
+
+        selector_card = ctk.CTkFrame(main_scroll, corner_radius=12)
+        selector_card.pack(fill="x", pady=(0, 14))
+
+        ctk.CTkLabel(
+            selector_card,
+            text="All modules are now available from one list",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+
+        self.module_actions = {
+            "ANOVA — One-Way ANOVA": self.launch_anova,
+            "Cronbach's Alpha": self.launch_cronbach,
+            "KR-20 Reliability": self.launch_kr20,
+            "Independent t-Test": self.launch_ttest,
+            "Pearson R Correlation": self.launch_pearson_r,
+            "Spearman Correlation": self.launch_spearman,
+            "Cohen's Kappa": self.launch_kappa,
+            "Chi-Square Test": self.launch_chi_square,
+            "Regression Analysis": self.launch_regression,
+            "Tally Module": self.launch_tally,
+            "Help & Docs": self.show_help,
+        }
+        module_names = list(self.module_actions.keys())
+
+        self.module_combo = ctk.CTkComboBox(
+            selector_card,
+            values=module_names,
+            width=560,
+            height=42,
+            font=ctk.CTkFont(size=14),
+            dropdown_font=ctk.CTkFont(size=13),
+            state="readonly"
+        )
+        self.module_combo.set("Pearson R Correlation")
+        self.module_combo.pack(fill="x", padx=16, pady=(0, 10))
+
+        launch_row = ctk.CTkFrame(selector_card, fg_color="transparent")
+        launch_row.pack(fill="x", padx=16, pady=(0, 14))
+
+        ctk.CTkButton(
+            launch_row,
+            text="▶ Launch Selected Module",
+            command=self.launch_selected_module,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#1976d2",
+            hover_color="#1565c0"
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            launch_row,
+            text="📚 Help",
+            command=self.show_help,
+            width=110,
+            height=40,
+            fg_color="#455a64",
+            hover_color="#37474f"
+        ).pack(side="left", padx=(10, 0))
         
         # Database management section (if available)
-        if DATABASE_AVAILABLE:
+        if self.database_ready:
             self.create_database_section(main_scroll)
         
         # Footer
@@ -298,6 +278,15 @@ class MainMenuApp(ctk.CTk):
             hover_color="#b71c1c"
         )
         exit_btn.pack(pady=(10, 0))
+
+    def launch_selected_module(self):
+        """Launch currently selected module from combo box."""
+        selected = self.module_combo.get().strip()
+        action = self.module_actions.get(selected)
+        if not action:
+            messagebox.showwarning("No Selection", "Please select a module first.")
+            return
+        action()
     
     def create_database_section(self, parent):
         """Create database management section"""
@@ -479,7 +468,7 @@ STATISTICAL ANALYSIS SUITE - USER GUIDE
 ========================================
 
 GETTING STARTED:
-1. Select an analysis tool from the grid
+1. Select an analysis tool from the module dropdown
 2. Import your data or enter manually
 3. Configure test parameters
 4. Run the analysis
@@ -628,6 +617,36 @@ Version: 2.0.0 (Database Integrated)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Regression Analysis:\n{str(e)}")
+
+    def launch_pearson_r(self):
+        """Launch Pearson R module."""
+        try:
+            app = pearson_r_module.PearsonRApp()
+            if DATABASE_AVAILABLE:
+                app.db_save_function = self.save_analysis_to_db
+            app.mainloop()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch Pearson R module:\n{str(e)}")
+
+    def launch_tally(self):
+        """Launch Tally module."""
+        try:
+            app = tally_module.TallyApp()
+            if DATABASE_AVAILABLE:
+                app.db_save_function = self.save_analysis_to_db
+            app.mainloop()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch Tally module:\n{str(e)}")
+
+    def launch_kr20(self):
+        """Launch KR-20 reliability module."""
+        try:
+            app = kr20_reliability_app.KR20ReliabilityApp()
+            if DATABASE_AVAILABLE:
+                app.db_save_function = self.save_analysis_to_db
+            app.mainloop()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch KR-20 module:\n{str(e)}")
     
     # ========================================================================
     # DATABASE OPERATIONS
@@ -638,18 +657,21 @@ Version: 2.0.0 (Database Integrated)
         Save analysis result to database.
         This function is passed to analysis modules for automatic saving.
         """
+        if not self.database_ready:
+            return None
         try:
             record_id = database.save_result(
                 analysis_type=analysis_type,
                 input_data=input_data,
                 result=result,
                 interpretation=interpretation,
-                metadata=metadata or {}
+                metadata=metadata or {},
+                db_path=self.db_path
             )
             
             if record_id:
                 # Update stats
-                self.db_stats = database.get_database_stats()
+                self.db_stats = database.get_database_stats(self.db_path)
                 print(f"✓ Analysis saved to database (ID: {record_id})")
                 return record_id
             else:
@@ -662,14 +684,23 @@ Version: 2.0.0 (Database Integrated)
     
     def view_history(self):
         """Open history viewer window"""
+        if not self.database_ready:
+            messagebox.showwarning("Database", "Database is not available.")
+            return
         HistoryViewer(self)
     
     def search_analyses(self):
         """Open search window"""
+        if not self.database_ready:
+            messagebox.showwarning("Database", "Database is not available.")
+            return
         SearchWindow(self)
     
     def export_history(self):
         """Export analysis history to CSV"""
+        if not self.database_ready:
+            messagebox.showwarning("Database", "Database is not available.")
+            return
         try:
             filename = filedialog.asksaveasfilename(
                 defaultextension=".csv",
@@ -678,7 +709,7 @@ Version: 2.0.0 (Database Integrated)
             )
             
             if filename:
-                success = database.export_to_csv(filename)
+                success = database.export_to_csv(filename, db_path=self.db_path)
                 if success:
                     messagebox.showinfo("Success", f"History exported to:\n{filename}")
                 else:
@@ -719,6 +750,7 @@ class HistoryViewer(ctk.CTkToplevel):
     
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent_app = parent
         
         self.title("Analysis History")
         self.geometry("1000x600")
@@ -768,7 +800,7 @@ class HistoryViewer(ctk.CTkToplevel):
     def load_history(self):
         """Load and display analysis history"""
         try:
-            records = database.get_all_results(limit=50)
+            records = database.get_all_results(limit=50, db_path=self.parent_app.db_path)
             self.current_records = records
             
             self.results_text.delete("1.0", "end")
@@ -810,7 +842,7 @@ class HistoryViewer(ctk.CTkToplevel):
                 record_id = int(id_input)
                 
                 if messagebox.askyesno("Confirm", f"Delete record ID {record_id}?"):
-                    success = database.delete_result(record_id)
+                    success = database.delete_result(record_id, db_path=self.parent_app.db_path)
                     if success:
                         messagebox.showinfo("Success", "Record deleted")
                         self.load_history()
@@ -832,7 +864,7 @@ class HistoryViewer(ctk.CTkToplevel):
             
             if id_input:
                 record_id = int(id_input)
-                record = database.get_result_by_id(record_id)
+                record = database.get_result_by_id(record_id, db_path=self.parent_app.db_path)
                 
                 if record:
                     DetailViewer(self, record)
@@ -853,6 +885,7 @@ class SearchWindow(ctk.CTkToplevel):
     
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent_app = parent
         
         self.title("Search Analyses")
         self.geometry("700x500")
@@ -867,7 +900,7 @@ class SearchWindow(ctk.CTkToplevel):
         # Search type
         ctk.CTkLabel(self, text="Analysis Type:").pack(pady=5)
         
-        types = database.get_analysis_types()
+        types = database.get_analysis_types(db_path=self.parent_app.db_path)
         self.type_menu = ctk.CTkOptionMenu(self, values=["All"] + types)
         self.type_menu.pack(pady=5)
         
@@ -890,9 +923,11 @@ class SearchWindow(ctk.CTkToplevel):
             analysis_type = self.type_menu.get()
             
             if analysis_type == "All":
-                results = database.get_all_results()
+                results = database.get_all_results(db_path=self.parent_app.db_path)
             else:
-                results = database.search_by_analysis_type(analysis_type)
+                results = database.search_by_analysis_type(
+                    analysis_type, db_path=self.parent_app.db_path
+                )
             
             self.results_text.delete("1.0", "end")
             

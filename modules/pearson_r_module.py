@@ -288,6 +288,16 @@ class CorrelationEngine:
         if r < -.01: return "Negative"
         return "None"
 
+    @staticmethod
+    def pearson_critical_r(n, alpha=0.05):
+        """Two-tailed critical |r| for Pearson correlation (df = n − 2)."""
+        df = n - 2
+        if df < 1:
+            raise ValueError("n must be at least 3.")
+        t_crit = stats.t.ppf(1 - alpha / 2, df)
+        r_crit = float(np.sqrt(t_crit**2 / (t_crit**2 + df)))
+        return r_crit, df, float(t_crit)
+
     @classmethod
     def _base(cls, xn, yn, r, p, n, ci_lo, ci_hi):
         t = r*np.sqrt(n-2)/np.sqrt(max(1-r**2,1e-15)) if abs(r)<.9999 else np.inf
@@ -1852,7 +1862,8 @@ class PDFReport:
     @staticmethod
     def generate(results, description, filename,
                  title=None, subtitle=None, byline=None,
-                 composite_info=None, var_descriptions=None):
+                 composite_info=None, var_descriptions=None,
+                 critical_value=None):
         # ── Tighter margins to maximise usable area ────────────────────────
         doc = SimpleDocTemplate(filename, pagesize=letter,
                                 rightMargin=40, leftMargin=40,
@@ -1901,6 +1912,24 @@ class PDFReport:
             els.append(Paragraph(byline, bs))
         els.append(Spacer(1, 3))
         els.append(Paragraph(f"<i>Method: {meth}  (coefficient: {sym})</i>", its))
+
+        # If the user computed a Pearson critical value, show it directly under Method.
+        if critical_value:
+            cv_n  = critical_value.get("n")
+            cv_df = critical_value.get("df")
+            cv_a  = critical_value.get("alpha", 0.05)
+            cv_t  = critical_value.get("t_critical")
+            cv_r  = critical_value.get("critical_r")
+
+            cv_t_str = f"{cv_t:.6f}" if cv_t is not None else "—"
+            cv_r_str = f"{cv_r:.6f}" if cv_r is not None else "—"
+
+            els.append(Paragraph(
+                f"<i>Critical Pearson r (two-tailed):</i> "
+                f"|r| = {cv_r_str}  (α = {cv_a}, n = {cv_n}, df = {cv_df}, t_critical = {cv_t_str})",
+                ns
+            ))
+
         if results.get("notes"):
             els.append(Paragraph(f"<i>{results['notes']}</i>", its))
         if description and description.strip():
@@ -2075,15 +2104,39 @@ class PDFReport:
         # ── Interpretation guide (compact, below the two-column block) ─────
         els.append(Spacer(1, 5))
         els.append(Paragraph("Correlation Interpretation Guide", hs))
+
+        # Render as a compact table instead of a single wrapped paragraph.
+        interp_tbl_data = [
+            [Paragraph("<b>|r| Range</b>", ns),
+             Paragraph("<b>Interpretation</b>", ns)],
+            [Paragraph("|r| >= .90", ns),
+             Paragraph("Very High", ns)],
+            [Paragraph(".70 <= |r| &lt; .90", ns),
+             Paragraph("High", ns)],
+            [Paragraph(".50 <= |r| &lt; .70", ns),
+             Paragraph("Moderate", ns)],
+            [Paragraph(".30 <= |r| &lt; .50", ns),
+             Paragraph("Low", ns)],
+            [Paragraph("|r| &lt; .30", ns),
+             Paragraph("Negligible", ns)],
+        ]
+        interp_t = Table(interp_tbl_data, colWidths=[2.0 * inch, 2.7 * inch])
+        interp_t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f7f7f7")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.black),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d1d5db")),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ]))
+        els.append(interp_t)
         els.append(Paragraph(
-            "<b>Guilford / Evans:</b>  "
-            "|r| ≥ .90 Very High  |  "
-            ".70 ≤ |r| &lt; .90 High  |  "
-            ".50 ≤ |r| &lt; .70 Moderate  |  "
-            ".30 ≤ |r| &lt; .50 Low  |  "
-            "|r| &lt; .30 Negligible  "
-            "<i>(negative r = inverse direction)</i>",
-            ns))
+            "<i>(negative r = inverse direction)</i>", ns))
 
         # ── Footer ─────────────────────────────────────────────────────────
         els.append(Spacer(1, 4))
@@ -2427,6 +2480,69 @@ class Sidebar(ctk.CTkFrame):
                                         font=("Segoe UI",13,"bold"),height=44)
         self.compute_btn.pack(**pad)
 
+        # ── Pair Compare (variable 1 vs variable 2) ───────────────────────
+        sec_label(s, "PAIRWISE COMPARE")
+        self.pair_mode_var = tk.BooleanVar(value=False)
+        self.pair_mode_chk = ctk.CTkCheckBox(
+            s,
+            text="Use only this variable pair",
+            variable=self.pair_mode_var,
+            fg_color=BG_INPUT,
+            hover_color=BG_PANEL,
+            text_color=TEXT_PRI,
+            font=FONT_BODY,
+        )
+        self.pair_mode_chk.pack(fill="x", padx=14, pady=(0, 6))
+
+        self.pair_var1_menu = ctk.CTkOptionMenu(
+            s,
+            values=["(load data first)"],
+            fg_color=BG_INPUT, button_color=ACCENT2,
+            button_hover_color="#3b7ddd",
+            text_color=TEXT_PRI,
+            dropdown_fg_color=BG_PANEL,
+            dropdown_text_color=TEXT_PRI,
+            font=FONT_BODY, height=34, corner_radius=6,
+            width=238,
+        )
+        self.pair_var1_menu.set("(load data first)")
+        ctk.CTkLabel(s, text="Variable 1", font=FONT_BODY, text_color=TEXT_SEC).pack(
+            anchor="w", padx=14, pady=(0, 2)
+        )
+        self.pair_var1_menu.pack(fill="x", padx=14, pady=(0, 8))
+
+        self.pair_var2_menu = ctk.CTkOptionMenu(
+            s,
+            values=["(load data first)"],
+            fg_color=BG_INPUT, button_color=SUCCESS,
+            button_hover_color="#16a34a",
+            text_color=TEXT_PRI,
+            dropdown_fg_color=BG_PANEL,
+            dropdown_text_color=TEXT_PRI,
+            font=FONT_BODY, height=34, corner_radius=6,
+            width=238,
+        )
+        self.pair_var2_menu.set("(load data first)")
+        ctk.CTkLabel(s, text="Variable 2", font=FONT_BODY, text_color=TEXT_SEC).pack(
+            anchor="w", padx=14, pady=(0, 2)
+        )
+        self.pair_var2_menu.pack(fill="x", padx=14, pady=(0, 6))
+
+        sec_label(s, "PEARSON r — CRITICAL VALUE")
+        crit_row = ctk.CTkFrame(s, fg_color="transparent")
+        crit_row.pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkLabel(crit_row, text="n", font=FONT_BODY, text_color=TEXT_SEC,
+                     width=20).pack(side="left", padx=(0, 6))
+        self.critical_n_entry = styled_entry(crit_row, placeholder="sample size",
+                                             width=100, height=34)
+        self.critical_n_entry.pack(side="left", padx=(0, 8))
+        self.critical_r_btn = ctk.CTkButton(
+            crit_row, text="Compute",
+            fg_color=BG_PANEL, hover_color=BORDER,
+            text_color=TEXT_PRI, font=FONT_BODY, height=34, width=118,
+            corner_radius=6, border_width=1, border_color=BORDER)
+        self.critical_r_btn.pack(side="left")
+
         self.plot_btn = sidebar_btn(s,"📉  View Scatter Plots",
                                      fg=PURPLE,hover="#7c3aed",state="disabled")
         self.plot_btn.pack(**pad)
@@ -2493,11 +2609,46 @@ class PearsonRApp(ctk.CTk):
         self.selected_cols   = None
         self.controls        = []
         self.results         = None
+        self.critical_value_info = None  # Stored for PDF export
         self.composite_info  = None
         self.var_descriptions = {}   # [NEW] {col: {label, desc}}
         self.dark_mode       = True
 
         self._build_ui()
+
+    def _available_numeric_columns(self):
+        """Returns available columns for pair/variable selection."""
+        if self.df is None:
+            return []
+        if self.selected_cols:
+            return [c for c in self.selected_cols
+                    if c in self.df.columns
+                    and c in set(self.df.select_dtypes(include=[np.number]).columns)]
+        return list(self.df.select_dtypes(include=[np.number]).columns)
+
+    def _update_pair_compare_controls(self):
+        cols = self._available_numeric_columns()
+        if len(cols) < 2:
+            self.sidebar.pair_mode_var.set(False)
+            self.sidebar.pair_var1_menu.configure(values=["(load data first)"])
+            self.sidebar.pair_var1_menu.set("(load data first)")
+            self.sidebar.pair_var2_menu.configure(values=["(load data first)"])
+            self.sidebar.pair_var2_menu.set("(load data first)")
+            return
+
+        self.sidebar.pair_var1_menu.configure(values=cols)
+        self.sidebar.pair_var2_menu.configure(values=cols)
+
+        cur1 = (self.sidebar.pair_var1_menu.get() or "").strip()
+        cur2 = (self.sidebar.pair_var2_menu.get() or "").strip()
+
+        if cur1 not in cols:
+            cur1 = cols[0]
+        if cur2 not in cols or cur2 == cur1:
+            cur2 = cols[1] if cols[1] != cur1 else cols[0]
+
+        self.sidebar.pair_var1_menu.set(cur1)
+        self.sidebar.pair_var2_menu.set(cur2)
 
     def _build_ui(self):
         self.sidebar = Sidebar(self)
@@ -2515,6 +2666,7 @@ class PearsonRApp(ctk.CTk):
         self.sidebar.var_desc_btn.configure(command=self.open_var_descriptions)
 
         self.sidebar.compute_btn.configure(command=self.compute_r)
+        self.sidebar.critical_r_btn.configure(command=self.compute_critical_r)
         self.sidebar.plot_btn.configure(command=self.open_plot)
         self.sidebar.export_btn.configure(command=self.export_pdf)
         self.sidebar.print_btn.configure(command=self.print_report)
@@ -2744,6 +2896,7 @@ class PearsonRApp(ctk.CTk):
             self.controls=[]; self.composite_info=None
             self.var_descriptions = {}
             self.data_table.display_data(self.df, selected_cols=self.selected_cols)
+            self._update_pair_compare_controls()
             self._activate_data_buttons()
             mi=METHODS[self.sidebar.method_key]
             self._set_results(
@@ -2781,6 +2934,7 @@ class PearsonRApp(ctk.CTk):
         self.composite_info = None
         self.var_descriptions = {}
         self.data_table.display_data(df, selected_cols=self.selected_cols)
+        self._update_pair_compare_controls()
         self._activate_data_buttons()
         mi       = METHODS[self.sidebar.method_key]
         cols_str = ", ".join(df.columns)
@@ -2804,6 +2958,7 @@ class PearsonRApp(ctk.CTk):
                                 for part, items in mapping_info.items()}
         self.var_descriptions = {}
         self.data_table.display_data(composite_df, selected_cols=self.selected_cols)
+        self._update_pair_compare_controls()
         self._activate_data_buttons()
         summary = "\n".join(
             f"  {part} ({mode} of {len(info['items'])} items): "
@@ -2852,6 +3007,7 @@ class PearsonRApp(ctk.CTk):
                     self.sidebar.plot_btn):
             btn.configure(state="disabled")
         self.data_table.display_data(new_df, selected_cols=self.selected_cols)
+        self._update_pair_compare_controls()
         self._update_data_info("Edited")
         self._set_results(
             f"{'='*37}\n  Dataset Updated  (Edited)\n{'='*37}\n\n"
@@ -2922,9 +3078,47 @@ class PearsonRApp(ctk.CTk):
         self.sidebar.status_label.configure(text=f"✓ {len(chosen)} vars\n{ctrl_txt}")
         if self.df is not None:
             self.data_table.display_data(self.df, selected_cols=self.selected_cols)
+            self._update_pair_compare_controls()
             self._update_data_info()
 
     # ── Compute ───────────────────────────────────────────────────────────────
+
+    def compute_critical_r(self):
+        raw = self.sidebar.critical_n_entry.get().strip()
+        if not raw:
+            messagebox.showwarning("Critical r", "Enter sample size n.", parent=self)
+            return
+        try:
+            n = int(float(raw))
+        except ValueError:
+            messagebox.showerror("Critical r", "n must be a number.", parent=self)
+            return
+        try:
+            r_crit, df, t_crit = CorrelationEngine.pearson_critical_r(n, alpha=0.05)
+        except ValueError as e:
+            messagebox.showwarning("Critical r", str(e), parent=self)
+            return
+
+        # Store for PDF export
+        self.critical_value_info = {
+            "n": n,
+            "df": df,
+            "alpha": 0.05,
+            "t_critical": t_crit,
+            "critical_r": r_crit,
+            "tail": "two-tailed",
+        }
+
+        messagebox.showinfo(
+            "Pearson r — critical value",
+            "Two-tailed test, α = 0.05\n\n"
+            f"n = {n}\n"
+            f"df = {df}\n"
+            f"t_critical = {t_crit:.6f}\n\n"
+            f"Critical |r| = {r_crit:.6f}\n\n"
+            "A sample correlation is significant at α = 0.05 (two-tailed)\n"
+            "if |r| exceeds this value.",
+            parent=self)
 
     def compute_r(self):
         if self.df is None:
@@ -2932,9 +3126,37 @@ class PearsonRApp(ctk.CTk):
         try:
             mkey  = self.sidebar.method_key
             mi    = METHODS[mkey]
-            cols  = self.selected_cols or list(
-                self.df.select_dtypes(include=[np.number]).columns)
             ctrl  = self.controls or []
+
+            # Optional pair-compare mode (Variable 1 vs Variable 2)
+            if getattr(self.sidebar, "pair_mode_var", None) and self.sidebar.pair_mode_var.get():
+                x = (self.sidebar.pair_var1_menu.get() or "").strip()
+                y = (self.sidebar.pair_var2_menu.get() or "").strip()
+                if not x or not y or x.startswith("(") or y.startswith("("):
+                    messagebox.showwarning(
+                        "Pair Compare",
+                        "Select two variables for the pair comparison.",
+                        parent=self,
+                    )
+                    return
+                if x == y:
+                    messagebox.showwarning(
+                        "Pair Compare",
+                        "Variable 1 and Variable 2 must be different.",
+                        parent=self,
+                    )
+                    return
+                cols = [x, y]
+                if mkey in ("partial", "semi_partial") and not ctrl:
+                    messagebox.showwarning(
+                        "Controls Required",
+                        "Partial / Semi-Partial correlation requires selecting control variables.",
+                        parent=self,
+                    )
+                    return
+            else:
+                cols  = self.selected_cols or list(
+                    self.df.select_dtypes(include=[np.number]).columns)
 
             self.results=CorrelationEngine.compute(self.df,mkey,cols,controls=ctrl)
             r=self.results; ts=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -3042,6 +3264,7 @@ class PearsonRApp(ctk.CTk):
             byline=self.sidebar.author_entry.get().strip(),
             composite_info=self.composite_info,
             var_descriptions=self.var_descriptions if self.var_descriptions else None,
+            critical_value=self.critical_value_info,
         )
 
     def export_pdf(self):
@@ -3113,7 +3336,11 @@ class PearsonRApp(ctk.CTk):
     def clear_all(self):
         self.df=None; self.raw_df=None; self.selected_cols=None
         self.controls=[]; self.results=None; self.composite_info=None
+        self.critical_value_info=None
         self.var_descriptions={}
+        if getattr(self.sidebar, "pair_mode_var", None):
+            self.sidebar.pair_mode_var.set(False)
+        self._update_pair_compare_controls()
         self.data_table.display_data(None)
         self.desc_text.delete("1.0","end")
         self._set_results("Cleared. Import data to begin.")
