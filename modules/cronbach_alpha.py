@@ -334,13 +334,14 @@ class Sidebar(ctk.CTkFrame):
 
         # Report meta
         sec_label(self, "REPORT TITLE")
-        self.title_entry = styled_entry(self, placeholder="Reliability Test")
-        self.title_entry.insert(0, "Reliability Test")
+        self.title_entry = styled_entry(self, placeholder="Part1-A")
+        self.title_entry.insert(0, "Part1-A")
         self.title_entry.pack(fill="x", padx=14, pady=(0, 4))
 
         sec_label(self, "SUBTITLE")
-        self.subtitle_entry = styled_entry(self, placeholder="Optional subtitle")
+        self.subtitle_entry = styled_entry(self, placeholder="Reliability Test")
         self.subtitle_entry.pack(fill="x", padx=14, pady=(0, 4))
+        self.subtitle_entry.insert(0, "Reliability Test")
 
         sec_label(self, "AUTHOR / RESEARCHER")
         self.author_entry = styled_entry(self, placeholder="e.g. Dr. John Smith")

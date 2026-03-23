@@ -1033,8 +1033,7 @@ class ANOVAAnalyzer(ctk.CTk):
             messagebox.showinfo("Saved", f"APA report saved successfully!\n\n{filepath}")
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save document:\n{e}")
-
+            messagebox.showerror("Error", f"Failed to save document:\n{e}") 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 

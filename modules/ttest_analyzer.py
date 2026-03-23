@@ -231,8 +231,21 @@ class GroupCard(ctk.CTkFrame):
 
         # ── Raw data area ──
         self.raw_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctk.CTkLabel(self.raw_frame, text="Data (comma-separated):",
-                     font=FONT_TINY, text_color=TEXT_SEC).pack(anchor="w", padx=12, pady=(2, 2))
+
+        raw_header = ctk.CTkFrame(self.raw_frame, fg_color="transparent")
+        raw_header.pack(fill="x", padx=12, pady=(2, 2))
+        ctk.CTkLabel(raw_header, text="Data (comma-separated):",
+                     font=FONT_TINY, text_color=TEXT_SEC).pack(side="left")
+        self.clear_raw_btn = ctk.CTkButton(
+            raw_header, text="🗑 Clear", width=68, height=22,
+            font=("Segoe UI", 10, "bold"),
+            fg_color=BG_INPUT, hover_color=DANGER,
+            text_color=TEXT_SEC, corner_radius=5, border_width=1,
+            border_color=BORDER,
+            command=self._clear_raw_data
+        )
+        self.clear_raw_btn.pack(side="right")
+
         self.data_text = ctk.CTkTextbox(self.raw_frame, height=80,
                                          fg_color=BG_INPUT, text_color=TEXT_PRI,
                                          border_width=1, border_color=BORDER,
@@ -255,6 +268,9 @@ class GroupCard(ctk.CTkFrame):
         note.pack(anchor="w", padx=12, pady=(0, 6))
         self._sum_note = note
         self._sum_note.pack_forget()  # hide by default
+
+    def _clear_raw_data(self):
+        self.data_text.delete("1.0", "end")
 
     def set_show_paired_note(self, show):
         if show:
