@@ -1,13 +1,7 @@
 """
-Cronbach's Alpha Reliability Test — Modern Sleek UI
-Matches the ANOVA Analyzer / t-Test aesthetic (dark sidebar, teal accent).
-
-Features:
-- Cronbach's Alpha (JASP-compatible standardized formula)
-- Likert frequency expander
-- CSV / Excel import
-- PDF report export
-- APA-style output
+cronbach_alpha_app.py  —  Cronbach's Alpha Reliability Test
+UPDATED: Session Manager integrated (multi-part save / export).
+FIX: Auto-label now preserves Part number and only increments the letter.
 """
 
 import tempfile
@@ -26,14 +20,21 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import os
 from app_settings import SettingsManager, SettingsWindow
 
-# silence winsound on non-Windows
+# ── Session manager ───────────────────────────────────────────────────────────
+from cronbach_session_manager import (
+    SessionManagerPanel,
+    _next_part_label,
+    export_all_to_docx,
+    export_all_to_pdf,
+)
+# ─────────────────────────────────────────────────────────────────────────────
+
 try:
     import winsound
     winsound.MessageBeep = lambda *a, **kw: None
 except ImportError:
     pass
 
-# ─── Palette ─────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -59,8 +60,6 @@ FONT_BTN  = ("Segoe UI", 13, "bold")
 FONT_TINY = ("Segoe UI", 11)
 FONT_SML  = ("Segoe UI", 9, "bold")
 
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def divider(parent):
     ctk.CTkFrame(parent, height=1, fg_color=BORDER, corner_radius=0).pack(fill="x")
@@ -170,7 +169,6 @@ class PDFReport:
                                 rightMargin=72, leftMargin=72,
                                 topMargin=72, bottomMargin=18)
         els, styles = [], getSampleStyleSheet()
-
         ts = ParagraphStyle('T', parent=styles['Heading1'], fontSize=16,
                             textColor=colors.black, spaceAfter=6,
                             alignment=TA_CENTER, fontName='Helvetica-Bold')
@@ -284,12 +282,9 @@ class DataTableFrame(ctk.CTkScrollableFrame):
             ctk.CTkLabel(self, text="No data loaded", font=FONT_BODY,
                          text_color=TEXT_SEC).pack(pady=30)
             return
-
         ctk.CTkLabel(self, text=f"📊 {len(df)} rows × {len(df.columns)} cols",
                      font=("Segoe UI", 11, "bold"), text_color=ACCENT).pack(pady=(6, 8))
-
         preview_df = df if max_rows is None else df.head(max_rows)
-
         hdr = ctk.CTkFrame(self, fg_color=BG_PANEL, corner_radius=6)
         hdr.pack(fill="x", padx=4, pady=(0, 2))
         ctk.CTkLabel(hdr, text="#", font=("Segoe UI", 10, "bold"),
@@ -297,7 +292,6 @@ class DataTableFrame(ctk.CTkScrollableFrame):
         for col in preview_df.columns:
             ctk.CTkLabel(hdr, text=str(col)[:12], font=("Segoe UI", 10, "bold"),
                          width=78, text_color=TEXT_PRI).pack(side="left", padx=2, pady=3)
-
         for idx, row in preview_df.iterrows():
             rf = ctk.CTkFrame(self, fg_color="transparent")
             rf.pack(fill="x", padx=4, pady=1)
@@ -319,7 +313,6 @@ class Sidebar(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Logo
         logo = ctk.CTkFrame(self, fg_color=ACCENT, corner_radius=0, height=64)
         logo.pack(fill="x"); logo.pack_propagate(False)
         ctk.CTkLabel(logo, text="  α  ", font=("Segoe UI", 30, "bold"),
@@ -332,10 +325,9 @@ class Sidebar(ctk.CTkFrame):
 
         divider(self)
 
-        # Report meta
         sec_label(self, "REPORT TITLE")
-        self.title_entry = styled_entry(self, placeholder="Part1-A")
-        self.title_entry.insert(0, "Part1-A")
+        self.title_entry = styled_entry(self, placeholder="Part 1-A")
+        self.title_entry.insert(0, "Part 1-A")
         self.title_entry.pack(fill="x", padx=14, pady=(0, 4))
 
         sec_label(self, "SUBTITLE")
@@ -367,6 +359,15 @@ class Sidebar(ctk.CTkFrame):
                                        font=("Segoe UI", 13, "bold"), height=44)
         self.compute_btn.pack(**pad)
 
+        self.save_part_btn = sidebar_btn(self, "💾  Save Part",
+                                          fg=SUCCESS, hover="#16a34a",
+                                          text_color="#0d1117", state="disabled")
+        self.save_part_btn.pack(**pad)
+
+        self.session_btn = sidebar_btn(self, "📁  Session Manager",
+                                        fg=PURPLE, hover="#9333ea")
+        self.session_btn.pack(**pad)
+
         self.export_btn = sidebar_btn(self, "📄  Export PDF",
                                       fg="#1d4ed8", hover="#1e3a8a", state="disabled")
         self.export_btn.pack(**pad)
@@ -389,7 +390,6 @@ class Sidebar(ctk.CTkFrame):
                                      font=FONT_BODY, height=32)
         self.theme_btn.pack(fill="x", padx=14, pady=8)
 
-        # Settings
         divider(self)
         self.settings_btn = sidebar_btn(self, "⚙   Settings",
                                         fg="#374151", hover="#4b5563",
@@ -400,9 +400,6 @@ class Sidebar(ctk.CTkFrame):
                                           text_color=ACCENT, fg_color=BG_CARD,
                                           wraplength=206)
         self.status_label.pack(side="bottom", padx=12, pady=8)
-        
-        
-        
 
 
 # ─── Likert Popup ─────────────────────────────────────────────────────────────
@@ -414,20 +411,15 @@ class LikertWindow(ctk.CTkToplevel):
         self.geometry("820x640")
         self.configure(fg_color=BG_DEEP)
         self.on_generate = on_generate
-
         self.scale_size = 4
         self.entries = {}
-
-        # Keep on top without blocking the main loop
         self.transient(master)
         self.lift()
         self.focus_force()
         self.attributes("-topmost", True)
-
         self._build()
 
     def _build(self):
-        # Header
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0, height=56)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
         ctk.CTkLabel(hdr, text="▶  Generate from Frequency Data",
@@ -436,7 +428,6 @@ class LikertWindow(ctk.CTkToplevel):
         body = ctk.CTkFrame(self, fg_color=BG_DEEP)
         body.pack(fill="both", expand=True, padx=16, pady=16)
 
-        # Config row
         cfg = card(body, "")
         cfg.pack(fill="x", pady=(0, 12))
         cfg_row = ctk.CTkFrame(cfg, fg_color="transparent")
@@ -463,14 +454,12 @@ class LikertWindow(ctk.CTkToplevel):
                       font=FONT_BTN, height=32, corner_radius=6,
                       width=130).pack(side="left")
 
-        # Grid
         grid_card = card(body, "")
         grid_card.pack(fill="both", expand=True, pady=(0, 12))
         self.grid_scroll = ctk.CTkScrollableFrame(grid_card, fg_color=BG_CARD,
                                                    scrollbar_button_color=BORDER)
         self.grid_scroll.pack(fill="both", expand=True, padx=12, pady=8)
 
-        # Bottom buttons
         btn_row = ctk.CTkFrame(body, fg_color="transparent")
         btn_row.pack(fill="x")
 
@@ -495,8 +484,7 @@ class LikertWindow(ctk.CTkToplevel):
         try:
             n = int(self.num_entry.get())
             if not 2 <= n <= 50:
-                messagebox.showwarning("Invalid", "Enter 2–50 items.", parent=self)
-                return
+                messagebox.showwarning("Invalid", "Enter 2–50 items.", parent=self); return
         except ValueError:
             messagebox.showerror("Error", "Enter a valid number.", parent=self); return
 
@@ -504,7 +492,6 @@ class LikertWindow(ctk.CTkToplevel):
             w.destroy()
         self.entries = {}
 
-        # Header row
         hdr = ctk.CTkFrame(self.grid_scroll, fg_color=BG_PANEL, corner_radius=6)
         hdr.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(hdr, text="Item", font=("Segoe UI", 11, "bold"),
@@ -584,20 +571,21 @@ class CronbachAlphaApp(ctk.CTk):
         self.minsize(1200, 700)
         self.configure(fg_color=BG_DEEP)
 
-        self.df = None
+        self.df      = None
         self.results = None
         self.dark_mode = True
+
+        self.saved_parts    = []
+        self._session_panel = None
 
         self._build_ui()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Sidebar
         self.sidebar = Sidebar(self)
         self.sidebar.pack(side="left", fill="y")
 
-        # Wire buttons
         self.sidebar.import_btn.configure(command=self.import_data)
         self.sidebar.likert_btn.configure(command=self.open_likert)
         self.sidebar.compute_btn.configure(command=self.compute_alpha)
@@ -607,27 +595,25 @@ class CronbachAlphaApp(ctk.CTk):
         self.sidebar.clear_btn.configure(command=self.clear_all)
         self.sidebar.theme_btn.configure(command=self.toggle_theme)
         self.sidebar.settings_btn.configure(command=self.open_settings)
+        self.sidebar.save_part_btn.configure(command=self.save_part)
+        self.sidebar.session_btn.configure(command=self.open_session_manager)
 
         content = ctk.CTkFrame(self, fg_color=BG_DEEP, corner_radius=0)
         content.pack(side="left", fill="both", expand=True)
 
-        # ── Header ────────────────────────────────────────────────────────────
         hdr = ctk.CTkFrame(content, fg_color=BG_CARD, corner_radius=0, height=64)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
-
         ctk.CTkLabel(hdr, text="Cronbach's Alpha Reliability Test",
                      font=FONT_HEAD, text_color=TEXT_PRI).pack(side="left", padx=24)
         ctk.CTkLabel(hdr, text="JASP-Compatible Formula",
                      font=("Segoe UI", 11), text_color=TEXT_SEC).pack(side="right", padx=24)
 
-        # ── Body: 3 resizable columns via PanedWindow ────────────────────────
         import tkinter as tk
         from tkinter import ttk
 
         outer = ctk.CTkFrame(content, fg_color=BG_DEEP)
         outer.pack(fill="both", expand=True, padx=14, pady=14)
 
-        # Style the sash (divider) to be visible and easy to grab
         style = ttk.Style()
         style.theme_use("default")
         style.configure("Sash", sashthickness=6, sashrelief="flat",
@@ -636,28 +622,24 @@ class CronbachAlphaApp(ctk.CTk):
         pane = ttk.PanedWindow(outer, orient=tk.HORIZONTAL)
         pane.pack(fill="both", expand=True)
 
-        # LEFT pane
         left_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         left = card(left_wrap, title="📋  Report Description")
         left.pack(fill="both", expand=True)
         self._build_desc_panel(left)
         pane.add(left_wrap, weight=3)
 
-        # CENTER pane (narrower)
         center_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         center = card(center_wrap, title="📊  Dataset Preview")
         center.pack(fill="both", expand=True)
         self._build_preview_panel(center)
         pane.add(center_wrap, weight=2)
 
-        # RIGHT pane
         right_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         right = card(right_wrap, title="📈  Analysis Results")
         right.pack(fill="both", expand=True)
         self._build_results_panel(right)
         pane.add(right_wrap, weight=3)
 
-        # Set initial sash positions after window renders
         def _set_sash(*_):
             total = pane.winfo_width()
             if total > 100:
@@ -666,7 +648,6 @@ class CronbachAlphaApp(ctk.CTk):
                 pane.unbind("<Configure>")
         pane.bind("<Configure>", _set_sash)
 
-        # ── Status bar ────────────────────────────────────────────────────────
         bar = ctk.CTkFrame(content, fg_color=BG_CARD, height=28, corner_radius=0)
         bar.pack(fill="x", side="bottom"); bar.pack_propagate(False)
         self.file_label = ctk.CTkLabel(bar, text="No file saved yet",
@@ -689,7 +670,6 @@ class CronbachAlphaApp(ctk.CTk):
                                          corner_radius=6)
         self.desc_text.pack(fill="x", padx=4, pady=(0, 12))
 
-        # Interpretation guide card
         guide = ctk.CTkFrame(scroll, fg_color=BG_PANEL, corner_radius=8,
                               border_width=1, border_color=BORDER)
         guide.pack(fill="x", padx=4, pady=(0, 12))
@@ -738,7 +718,9 @@ class CronbachAlphaApp(ctk.CTk):
             "    use Frequency Expander\n"
             " 2. Click  ▶ Compute α\n"
             " 3. Review results here\n"
-            " 4. Export PDF report\n\n"
+            " 4. 💾 Save Part  to session\n"
+            " 5. Repeat for next part\n"
+            " 6. 📁 Session Manager → Export All\n\n"
             "Waiting for data…"
         )
 
@@ -749,6 +731,10 @@ class CronbachAlphaApp(ctk.CTk):
         self.results_text.delete("1.0", "end")
         self.results_text.insert("1.0", text)
         self.results_text.configure(state="disabled")
+
+    def _current_title_entry(self) -> str:
+        """Return whatever is currently typed in the Report Title entry field."""
+        return self.sidebar.title_entry.get().strip()
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
@@ -843,11 +829,12 @@ class CronbachAlphaApp(ctk.CTk):
                     f"ITEMS ({r['n_items']}):\n"
                     f"{'═'*40}\n")
             txt += "\n".join(f"  {i+1}. {nm}" for i, nm in enumerate(r['item_names']))
-            txt += "\n\n✓ Ready to export PDF report!"
+            txt += "\n\n✓ Click  💾 Save Part  to add to session."
 
             self._set_results(txt)
             self.sidebar.export_btn.configure(state="normal")
             self.sidebar.print_btn.configure(state="normal")
+            self.sidebar.save_part_btn.configure(state="normal")
             self.stat_label.configure(
                 text=f"α = {r['alpha']:.4f}   {r['interpretation']}   "
                      f"k={r['n_items']}   N={r['n_respondents']}"
@@ -857,7 +844,8 @@ class CronbachAlphaApp(ctk.CTk):
             messagebox.showinfo("Done",
                 f"Cronbach's Alpha computed!\n\n"
                 f"α = {r['alpha']:.4f}\n"
-                f"Interpretation: {r['interpretation']}")
+                f"Interpretation: {r['interpretation']}\n\n"
+                f"Click  💾 Save Part  to add to the session.")
         except Exception as e:
             messagebox.showerror("Error", f"Computation failed:\n{e}")
 
@@ -884,12 +872,12 @@ class CronbachAlphaApp(ctk.CTk):
             messagebox.showinfo("Saved", f"PDF exported:\n{fp}")
         except Exception as e:
             messagebox.showerror("Error", f"Export failed:\n{e}")
+
     def print_report(self):
         if self.results is None:
             messagebox.showwarning("No Results", "Compute alpha first."); return
-        import tempfile, subprocess, sys, os
+        import subprocess, sys
 
-        # Generate a temp PDF
         tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
         tmp_path = tmp.name
         tmp.close()
@@ -903,26 +891,19 @@ class CronbachAlphaApp(ctk.CTk):
                 subtitle=self.sidebar.subtitle_entry.get().strip(),
                 byline=self.sidebar.author_entry.get().strip()
             )
-
             if sys.platform == "win32":
-                # Use ShellExecute to open the system print dialog
                 import ctypes
                 ctypes.windll.shell32.ShellExecuteW(
-                    None, "print", tmp_path, None, None, 0
-                )
+                    None, "print", tmp_path, None, None, 0)
             elif sys.platform == "darwin":
                 subprocess.run(["lpr", tmp_path])
             else:
-                # Linux — try lpr, fallback to xdg-open
                 result = subprocess.run(["lpr", tmp_path])
                 if result.returncode != 0:
                     subprocess.run(["xdg-open", tmp_path])
-
             self.sidebar.status_label.configure(text="🖨️ Sent to printer")
-
         except Exception as e:
             messagebox.showerror("Print Error", f"Printing failed:\n{e}")
-            # Clean up temp file on error
             try: os.unlink(tmp_path)
             except: pass
 
@@ -941,6 +922,118 @@ class CronbachAlphaApp(ctk.CTk):
             messagebox.showinfo("Saved", f"Dataset exported:\n{os.path.basename(fp)}")
         except Exception as e:
             messagebox.showerror("Error", f"Export failed:\n{e}")
+
+    # ── Session actions ────────────────────────────────────────────────────────
+
+    def save_part(self):
+        """Snapshot the current results and metadata into saved_parts."""
+        if self.results is None:
+            messagebox.showwarning("No Results", "Compute alpha first."); return
+
+        # ── FIX: read the current title entry so the Part number is preserved ──
+        current = self._current_title_entry()
+        label = _next_part_label(
+            [p["label"] for p in self.saved_parts],
+            current_label=current
+        )
+
+        report_title = current or label
+
+        part = {
+            **self.results,
+            "label":           label,
+            "report_title":    report_title,
+            "report_subtitle": self.sidebar.subtitle_entry.get().strip(),
+            "researcher_name": self.sidebar.author_entry.get().strip(),
+            "description":     self.desc_text.get("1.0", "end-1c").strip(),
+            "saved_at":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        self.saved_parts.append(part)
+
+        # ── FIX: advance only the letter, keeping the same Part number ──────
+        next_label = _next_part_label(
+            [p["label"] for p in self.saved_parts],
+            current_label=label          # base off the label just saved
+        )
+        self.sidebar.title_entry.delete(0, "end")
+        self.sidebar.title_entry.insert(0, next_label)
+
+        # Refresh panel if open
+        if self._session_panel and self._session_panel.winfo_exists():
+            self._session_panel.refresh()
+
+        n = len(self.saved_parts)
+        self.sidebar.status_label.configure(
+            text=f"✓ Saved as {label}\n{n} part(s) in session")
+        messagebox.showinfo("Part Saved",
+            f"'{label}' added to session.\n\n"
+            f"Total parts in session: {n}\n\n"
+            f"Open 📁 Session Manager to view or export all.")
+
+    def open_session_manager(self):
+        """Open (or bring to front) the session manager panel."""
+        if self._session_panel and self._session_panel.winfo_exists():
+            self._session_panel.lift()
+            self._session_panel.focus_force()
+            return
+
+        self._session_panel = SessionManagerPanel(
+            master=self,
+            saved_parts=self.saved_parts,
+            on_delete_part=self._delete_part,
+            on_export_all_docx=self._export_all_docx,
+            on_export_all_pdf=self._export_all_pdf,
+        )
+
+    def _delete_part(self, label: str):
+        for i, p in enumerate(self.saved_parts):
+            if p["label"] == label:
+                self.saved_parts.pop(i)
+                break
+        n = len(self.saved_parts)
+        self.sidebar.status_label.configure(
+            text=f"🗑 Deleted {label}\n{n} part(s) remain")
+
+    def _export_all_docx(self):
+        if not self.saved_parts:
+            messagebox.showwarning("Empty Session",
+                "No parts saved yet. Save at least one part first."); return
+        fp = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word Document", "*.docx")],
+            initialfile=f"CronbachAlpha_Session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        )
+        if not fp: return
+        try:
+            export_all_to_docx(self.saved_parts, fp)
+            messagebox.showinfo("Exported",
+                f"All {len(self.saved_parts)} part(s) exported to DOCX:\n{fp}")
+            self.sidebar.status_label.configure(
+                text=f"✓ DOCX exported\n{os.path.basename(fp)}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"DOCX export failed:\n{e}")
+
+    def _export_all_pdf(self):
+        if not self.saved_parts:
+            messagebox.showwarning("Empty Session",
+                "No parts saved yet. Save at least one part first."); return
+        fp = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=f"CronbachAlpha_Session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        )
+        if not fp: return
+        try:
+            export_all_to_pdf(self.saved_parts, fp)
+            messagebox.showinfo("Exported",
+                f"All {len(self.saved_parts)} part(s) exported to PDF:\n{fp}")
+            self.sidebar.status_label.configure(
+                text=f"✓ PDF exported\n{os.path.basename(fp)}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"PDF export failed:\n{e}")
+
+    # ── Misc ──────────────────────────────────────────────────────────────────
 
     def open_settings(self):
         SettingsWindow(self, self)
@@ -966,6 +1059,15 @@ class CronbachAlphaApp(ctk.CTk):
         self.sidebar.status_label.configure(text="")
         self.sidebar.export_btn.configure(state="disabled")
         self.sidebar.export_data_btn.configure(state="disabled")
+        self.sidebar.save_part_btn.configure(state="disabled")
+        # ── FIX: preserve Part number when clearing, only advance letter ──────
+        current = self._current_title_entry()
+        next_label = _next_part_label(
+            [p["label"] for p in self.saved_parts],
+            current_label=current
+        )
+        self.sidebar.title_entry.delete(0, "end")
+        self.sidebar.title_entry.insert(0, next_label)
 
     def toggle_theme(self):
         if self.dark_mode:

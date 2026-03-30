@@ -15,19 +15,22 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import os
 from app_settings import SettingsManager, SettingsWindow
+from session_manager import (
+    SessionManagerPanel, _next_part_label,
+    export_all_to_docx, export_all_to_pdf
+)
 
 # ─── Theme ───────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 plt.style.use('dark_background')
 
-# Palette
 BG_DEEP   = "#0d1117"
 BG_CARD   = "#161b22"
 BG_PANEL  = "#1c2230"
 BG_INPUT  = "#1e2736"
-ACCENT    = "#00c9a7"        # teal-green (matches Kappa screenshot)
-ACCENT2   = "#4e9eff"        # blue highlight
+ACCENT    = "#00c9a7"
+ACCENT2   = "#4e9eff"
 DANGER    = "#ef4444"
 WARN      = "#f59e0b"
 SUCCESS   = "#22c55e"
@@ -46,7 +49,6 @@ FONT_TINY = ("Segoe UI", 9)
 
 
 def fmt(val, decimals=2):
-    """Round to 2 decimal places and return formatted string."""
     return f"{round(float(val), decimals):.{decimals}f}"
 
 
@@ -58,7 +60,6 @@ class Sidebar(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Logo area
         self.logo_frame = ctk.CTkFrame(self, fg_color=ACCENT, corner_radius=0, height=64)
         self.logo_frame.pack(fill="x")
         self.logo_frame.pack_propagate(False)
@@ -74,7 +75,6 @@ class Sidebar(ctk.CTkFrame):
 
         divider(self)
 
-        # Rater / Researcher name
         ctk.CTkLabel(self, text="RESEARCHER NAME", font=("Segoe UI", 9, "bold"),
                      text_color=TEXT_SEC, fg_color=BG_CARD).pack(anchor="w", padx=18, pady=(18, 4))
         self.researcher_entry = styled_entry(self, placeholder="e.g. Dr. John Smith")
@@ -82,7 +82,6 @@ class Sidebar(ctk.CTkFrame):
 
         divider(self)
 
-        # Action buttons
         pad = {"fill": "x", "padx": 14, "pady": 5}
 
         self.import_btn = sidebar_btn(self, "📁  Import Excel / CSV",
@@ -105,7 +104,23 @@ class Sidebar(ctk.CTkFrame):
                                    font=("Segoe UI", 13, "bold"), height=44)
         self.run_btn.pack(**pad)
 
-        self.save_btn = sidebar_btn(self, "💾  Export DOCX", fg="#1d4ed8", hover="#1e3a8a")
+        # ── SAVE PART (new) ──────────────────────────────────────────────────
+        self.save_part_btn = sidebar_btn(self, "🗂  Save Part",
+                                          fg="#7c3aed", hover="#5b21b6",
+                                          font=("Segoe UI", 12, "bold"), height=40)
+        self.save_part_btn.configure(state="disabled")
+        self.save_part_btn.pack(**pad)
+
+        # ── PART COUNTER badge ───────────────────────────────────────────────
+        self.parts_count_lbl = ctk.CTkLabel(
+            self, text="0 part(s) saved",
+            font=("Segoe UI", 9, "bold"),
+            text_color=ACCENT, fg_color=BG_CARD)
+        self.parts_count_lbl.pack(pady=(0, 4))
+
+        divider(self)
+
+        self.save_btn = sidebar_btn(self, "💾  Export DOCX (single)", fg="#1d4ed8", hover="#1e3a8a")
         self.save_btn.pack(**pad)
 
         self.preview_btn = sidebar_btn(self, "✏️  Preview & Edit (APA)",
@@ -118,17 +133,23 @@ class Sidebar(ctk.CTkFrame):
         self.plots_btn.configure(state="disabled")
         self.plots_btn.pack(**pad)
 
+        divider(self)
+
+        # ── SESSION MANAGER (new) ────────────────────────────────────────────
+        self.session_btn = sidebar_btn(self, "📂  Session Manager",
+                                        fg="#1e3a2f", hover="#14532d",
+                                        font=("Segoe UI", 12, "bold"), height=40)
+        self.session_btn.pack(**pad)
+
         self.reset_btn = sidebar_btn(self, "🔄  Reset", fg="#92400e", hover="#78350f")
         self.reset_btn.pack(**pad)
 
-        # Settings button
         divider(self)
         self.settings_btn = sidebar_btn(self, "⚙   Settings",
                                         fg="#374151", hover="#4b5563",
                                         font=FONT_BODY, height=32)
         self.settings_btn.pack(fill="x", padx=14, pady=8)
 
-        # Footer status
         self.status_label = ctk.CTkLabel(self, text="", font=FONT_TINY,
                                           text_color=ACCENT, fg_color=BG_CARD,
                                           wraplength=190)
@@ -178,8 +199,10 @@ class ANOVAAnalyzer(ctk.CTk):
         self.minsize(1100, 700)
         self.configure(fg_color=BG_DEEP)
 
-        self.group_widgets = []
-        self.anova_results = None
+        self.group_widgets  = []
+        self.anova_results  = None
+        self.saved_parts    = []          # ← NEW: list of saved part dicts
+        self._session_win   = None        # ← reference to open SessionManagerPanel
 
         self._build_ui()
         for _ in range(3):
@@ -188,31 +211,28 @@ class ANOVAAnalyzer(ctk.CTk):
     # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Sidebar
         self.sidebar = Sidebar(self)
         self.sidebar.pack(side="left", fill="y")
 
-        # Wire sidebar buttons
         self.sidebar.import_btn.configure(command=self.import_excel)
         self.sidebar.add_btn.configure(command=self.add_group)
         self.sidebar.clear_btn.configure(command=self.clear_all)
         self.sidebar.run_btn.configure(command=self.run_anova)
+        self.sidebar.save_part_btn.configure(command=self.save_current_part)   # NEW
         self.sidebar.save_btn.configure(command=self.save_to_docx)
         self.sidebar.preview_btn.configure(command=self.preview_edit_docx_report)
         self.sidebar.plots_btn.configure(command=self.preview_plots_graphs)
+        self.sidebar.session_btn.configure(command=self.open_session_manager)   # NEW
         self.sidebar.reset_btn.configure(command=self.reset_all)
         self.sidebar.settings_btn.configure(command=self.open_settings)
 
-        # Main content
         content = ctk.CTkFrame(self, fg_color=BG_DEEP, corner_radius=0)
         content.pack(side="left", fill="both", expand=True)
 
-        # ── Top header bar ────────────────────────────────────────────────────
         header = ctk.CTkFrame(content, fg_color=BG_CARD, corner_radius=0, height=64)
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        # LEFT side: Title + Subtitle entries
         meta_row = ctk.CTkFrame(header, fg_color=BG_CARD)
         meta_row.pack(side="left", padx=16)
 
@@ -229,11 +249,15 @@ class ANOVAAnalyzer(ctk.CTk):
         self.report_subtitle_entry.insert(0, "ANOVA")
         self.report_subtitle_entry.grid(row=0, column=3, padx=4)
 
-        # RIGHT side: app name as subtitle label
+        # ── Part label entry (NEW) ─────────────────────────────────────────
+        ctk.CTkLabel(meta_row, text="Part:", font=("Segoe UI", 12, "bold"),
+                     text_color=ACCENT).grid(row=0, column=4, padx=(16, 4))
+        self.part_label_entry = styled_entry(meta_row, placeholder="e.g. Part 1-A", width=110)
+        self.part_label_entry.grid(row=0, column=5, padx=4)
+
         ctk.CTkLabel(header, text="One-Way ANOVA Analysis",
                      font=("Segoe UI", 13), text_color=TEXT_SEC).pack(side="right", padx=24)
 
-        # ── Two-column resizable body ─────────────────────────────────────────
         import tkinter as tk
         from tkinter import ttk
 
@@ -242,13 +266,11 @@ class ANOVAAnalyzer(ctk.CTk):
 
         style = ttk.Style()
         style.theme_use("default")
-        style.configure("Sash", sashthickness=6, sashrelief="flat",
-                        background="#30363d")
+        style.configure("Sash", sashthickness=6, sashrelief="flat", background="#30363d")
 
         pane = ttk.PanedWindow(outer, orient=tk.HORIZONTAL)
         pane.pack(fill="both", expand=True)
 
-        # LEFT
         left_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         left = card(left_wrap, title="📋  Input Data  (comma-separated values)")
         left.pack(fill="both", expand=True)
@@ -257,7 +279,6 @@ class ANOVAAnalyzer(ctk.CTk):
         self.groups_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         pane.add(left_wrap, weight=1)
 
-        # RIGHT
         right_wrap = ctk.CTkFrame(pane, fg_color=BG_DEEP)
         right = card(right_wrap, title="📊  Analysis Results")
         right.pack(fill="both", expand=True)
@@ -275,7 +296,6 @@ class ANOVAAnalyzer(ctk.CTk):
                 pane.unbind("<Configure>")
         pane.bind("<Configure>", _set_sash)
 
-        # ── Status bar ────────────────────────────────────────────────────────
         bar = ctk.CTkFrame(content, fg_color=BG_CARD, height=28, corner_radius=0)
         bar.pack(fill="x", side="bottom")
         bar.pack_propagate(False)
@@ -290,7 +310,6 @@ class ANOVAAnalyzer(ctk.CTk):
 
     def add_group(self):
         group_num = len(self.group_widgets) + 1
-
         row = ctk.CTkFrame(self.groups_frame, fg_color=BG_PANEL,
                            corner_radius=8, border_width=1, border_color=BORDER)
         row.pack(fill="x", pady=4)
@@ -299,8 +318,7 @@ class ANOVAAnalyzer(ctk.CTk):
                              font=("Segoe UI", 11, "bold"),
                              fg_color=ACCENT, border_color=ACCENT,
                              text_color="#0d1117",
-                             justify="center",
-                             border_width=0, corner_radius=6)
+                             justify="center", border_width=0, corner_radius=6)
         badge.insert(0, f"G{group_num}")
         badge.pack(side="left", padx=(10, 8), pady=8)
 
@@ -329,8 +347,7 @@ class ANOVAAnalyzer(ctk.CTk):
         for i, (r, b, e, btn) in enumerate(self.group_widgets, 1):
             import re
             if re.fullmatch(r"G\d+", b.get()):
-                b.delete(0, "end")
-                b.insert(0, f"G{i}")
+                b.delete(0, "end"); b.insert(0, f"G{i}")
 
     def clear_all(self):
         for _, _, entry, _ in self.group_widgets:
@@ -342,7 +359,129 @@ class ANOVAAnalyzer(ctk.CTk):
         self.anova_results = None
         self.sidebar.preview_btn.configure(state="disabled")
         self.sidebar.plots_btn.configure(state="disabled")
+        self.sidebar.save_part_btn.configure(state="disabled")
         self.kappa_label.configure(text="")
+        # Pre-fill next part label
+        self._prefill_next_part_label()
+
+    # ── Part label auto-fill ──────────────────────────────────────────────────
+
+    def _prefill_next_part_label(self):
+        next_lbl = _next_part_label([p["label"] for p in self.saved_parts])
+        self.part_label_entry.delete(0, "end")
+        self.part_label_entry.insert(0, next_lbl)
+
+    def _update_parts_badge(self):
+        n = len(self.saved_parts)
+        self.sidebar.parts_count_lbl.configure(
+            text=f"{n} part(s) saved",
+            text_color=ACCENT if n > 0 else TEXT_SEC
+        )
+
+    # ── Save Current Part (NEW) ───────────────────────────────────────────────
+
+    def save_current_part(self):
+        if not self.anova_results:
+            messagebox.showwarning("Warning", "Run ANOVA first before saving a part!"); return
+
+        part_label = self.part_label_entry.get().strip()
+        if not part_label:
+            part_label = _next_part_label([p["label"] for p in self.saved_parts])
+
+        # Check for duplicate label
+        existing_labels = [p["label"] for p in self.saved_parts]
+        if part_label in existing_labels:
+            overwrite = messagebox.askyesno(
+                "Duplicate Part",
+                f"'{part_label}' already exists.\nOverwrite it?")
+            if not overwrite:
+                return
+            self.saved_parts = [p for p in self.saved_parts if p["label"] != part_label]
+
+        # Deep-copy the results dict and tag it
+        import copy
+        part_data = copy.deepcopy(self.anova_results)
+        part_data["label"]    = part_label
+        part_data["saved_at"] = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+
+        self.saved_parts.append(part_data)
+        self._update_parts_badge()
+
+        # Refresh session panel if open
+        if self._session_win and self._session_win.winfo_exists():
+            self._session_win.saved_parts = self.saved_parts
+            self._session_win.refresh()
+
+        # Confirm, clear inputs, prefill next label
+        messagebox.showinfo(
+            "Part Saved ✓",
+            f"'{part_label}' has been saved!\n\n"
+            f"Inputs will be cleared so you can enter the next part.\n"
+            f"Total saved: {len(self.saved_parts)} part(s)")
+
+        self.clear_all()
+        self.results_text.delete("1.0", "end")
+        self.anova_results = None
+        self.sidebar.preview_btn.configure(state="disabled")
+        self.sidebar.plots_btn.configure(state="disabled")
+        self.sidebar.save_part_btn.configure(state="disabled")
+        self.kappa_label.configure(text="")
+        self._prefill_next_part_label()
+
+        self.sidebar.status_label.configure(
+            text=f"✓ {part_label} saved\n{len(self.saved_parts)} total part(s)")
+
+    # ── Session Manager (NEW) ─────────────────────────────────────────────────
+
+    def open_session_manager(self):
+        if self._session_win and self._session_win.winfo_exists():
+            self._session_win.focus(); return
+
+        self._session_win = SessionManagerPanel(
+            self,
+            saved_parts=self.saved_parts,
+            on_delete_part=self._delete_part,
+            on_export_all_docx=self._export_all_docx,
+            on_export_all_pdf=self._export_all_pdf
+        )
+
+    def _delete_part(self, label: str):
+        self.saved_parts = [p for p in self.saved_parts if p["label"] != label]
+        self._update_parts_badge()
+
+    def _export_all_docx(self):
+        if not self.saved_parts:
+            messagebox.showwarning("Warning", "No saved parts to export!"); return
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            filetypes=[("Word Document", "*.docx"), ("All Files", "*.*")],
+            title="Export All Parts — DOCX"
+        )
+        if not filepath: return
+        try:
+            export_all_to_docx(self.saved_parts, filepath)
+            self.file_label.configure(text=f"DOCX: {os.path.basename(filepath)}")
+            messagebox.showinfo("Exported ✓",
+                                f"All {len(self.saved_parts)} part(s) exported to DOCX!\n\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"DOCX export error:\n{e}")
+
+    def _export_all_pdf(self):
+        if not self.saved_parts:
+            messagebox.showwarning("Warning", "No saved parts to export!"); return
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF File", "*.pdf"), ("All Files", "*.*")],
+            title="Export All Parts — PDF"
+        )
+        if not filepath: return
+        try:
+            export_all_to_pdf(self.saved_parts, filepath)
+            self.file_label.configure(text=f"PDF: {os.path.basename(filepath)}")
+            messagebox.showinfo("Exported ✓",
+                                f"All {len(self.saved_parts)} part(s) exported to PDF!\n\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"PDF export error:\n{e}")
 
     # ── Import ────────────────────────────────────────────────────────────────
 
@@ -353,41 +492,25 @@ class ANOVAAnalyzer(ctk.CTk):
         sm = SettingsManager()
         fb, fc, fh, fm, fbt, ft = sm.fonts
         ff = sm.font_family
-
-        # Theme
         ctk.set_appearance_mode(
-            {"Dark": "dark", "Light": "light", "System": "system"}
-            .get(sm.get("theme"), "dark")
-        )
-
-        # Sidebar width & accent
+            {"Dark": "dark", "Light": "light", "System": "system"}.get(sm.get("theme"), "dark"))
         self.sidebar.configure(width=sm.sidebar_width)
         self.sidebar.logo_frame.configure(fg_color=sm.accent)
-        self.sidebar.run_btn.configure(
-            fg_color=sm.accent, hover_color=sm.accent_hover,
-            font=(ff, fbt, "bold"))
-
-        # Sidebar labels
+        self.sidebar.run_btn.configure(fg_color=sm.accent, hover_color=sm.accent_hover,
+                                       font=(ff, fbt, "bold"))
         self.sidebar.title_lbl.configure(font=(ff, fc, "bold"))
         self.sidebar.subtitle_lbl.configure(font=(ff, ft))
         self.sidebar.status_label.configure(font=(ff, ft))
-
-        # All sidebar buttons font update
         for btn in [self.sidebar.import_btn, self.sidebar.add_btn,
                     self.sidebar.clear_btn, self.sidebar.save_btn,
                     self.sidebar.preview_btn, self.sidebar.plots_btn,
-                    self.sidebar.reset_btn, self.sidebar.settings_btn]:
+                    self.sidebar.reset_btn, self.sidebar.settings_btn,
+                    self.sidebar.save_part_btn, self.sidebar.session_btn]:
             try: btn.configure(font=(ff, fbt))
             except Exception: pass
-
-        # Results text
         self.results_text.configure(font=(ff, fm), wrap=sm.wrap_mode)
-
-        # Status bar
         self.kappa_label.configure(font=(ff, ft, "bold"))
         self.file_label.configure(font=(ff, ft))
-
-        # Group data entry fonts
         for _, badge, entry, _ in self.group_widgets:
             entry.configure(font=(ff, fb))
 
@@ -396,18 +519,15 @@ class ANOVAAnalyzer(ctk.CTk):
             title="Select Excel / CSV File",
             filetypes=[("Excel files", "*.xlsx"), ("CSV files", "*.csv"), ("All files", "*.*")]
         )
-        if not filepath:
-            return
+        if not filepath: return
         try:
             df = pd.read_excel(filepath) if filepath.endswith(".xlsx") else pd.read_csv(filepath)
             if len(df.columns) == 0:
                 messagebox.showerror("Error", "File has no data columns!"); return
-
             self.clear_all()
             current = len(self.group_widgets)
             for _ in range(max(0, len(df.columns) - current)):
                 self.add_group()
-
             ok = 0
             for col_idx, col in enumerate(df.columns):
                 if col_idx >= len(self.group_widgets): break
@@ -417,7 +537,6 @@ class ANOVAAnalyzer(ctk.CTk):
                 entry.delete(0, "end")
                 entry.insert(0, ", ".join(str(v) for v in data.values))
                 ok += 1
-
             if ok:
                 messagebox.showinfo("Imported", f"Imported {ok} group(s) successfully.")
             else:
@@ -466,7 +585,7 @@ class ANOVAAnalyzer(ctk.CTk):
 
             alpha = 0.05
             sig = p_val < alpha
-            decision = "Reject H₀" if sig else "Fail to Reject H₀"
+            decision   = "Reject Ho" if sig else "Fail to Reject Ho"
             conclusion = ("There is a statistically significant difference among group means."
                           if sig else
                           "There is no statistically significant difference among group means.")
@@ -496,9 +615,12 @@ class ANOVAAnalyzer(ctk.CTk):
             self._display_results()
             self.sidebar.preview_btn.configure(state="normal")
             self.sidebar.plots_btn.configure(state="normal")
+            self.sidebar.save_part_btn.configure(state="normal")   # ← enable Save Part
+
             sm2 = SettingsManager()
             self.kappa_label.configure(
-                text=f"F({df_b}, {df_w}) = {sm2.fmt(F_stat)}   p = {sm2.fmt(p_val)}   {'✓ Significant' if sig else '✗ Not Significant'}"
+                text=f"F({df_b}, {df_w}) = {sm2.fmt(F_stat)}   p = {sm2.fmt(p_val)}"
+                     f"   {'✓ Significant' if sig else '✗ Not Significant'}"
             )
 
         except Exception as e:
@@ -510,13 +632,14 @@ class ANOVAAnalyzer(ctk.CTk):
         self.results_text.delete("1.0", "end")
         r = self.anova_results
         if r is None: return
-        # Use live decimal/wrap settings
         sm = SettingsManager()
         self.results_text.configure(wrap=sm.wrap_mode)
         def _f(v): return sm.fmt(v)
 
+        # Show current part label at top
+        part_lbl = self.part_label_entry.get().strip() or "(unsaved)"
         line = "─" * 52
-        out = f"{line}\n{r['report_title']}\n"
+        out  = f"[{part_lbl}]\n{line}\n{r['report_title']}\n"
         if r["report_subtitle"]: out += f"{r['report_subtitle']}\n"
         if r["researcher_name"]: out += f"by: {r['researcher_name']}\n"
         out += f"{line}\n\n"
@@ -538,13 +661,13 @@ class ANOVAAnalyzer(ctk.CTk):
         out += f"\n{'═'*52}\nTEST RESULTS\n{'═'*52}\n"
         out += (f"F({r['df_between']}, {r['df_within']}) = {_f(r['F_statistic'])},  "
                 f"p = {_f(r['p_value'])},  α = {r['alpha']}\n\n")
-        out += f"Decision:   {r['decision']}\n\n"
-        out += f"Conclusion:\n{r['conclusion']}\n"
+        out += f"Decision:   {r['decision']}\n\nConclusion:\n{r['conclusion']}\n"
 
         if r["is_significant"] and "tukey" in r:
             out += f"\n{'─'*52}\nPOST HOC — Tukey HSD\n{'─'*52}\n"
             out += str(r["tukey"]) + "\n"
 
+        out += f"\n{'─'*52}\n⚠  Remember: click '🗂 Save Part' to keep these results!"
         self.results_text.insert("1.0", out)
 
     # ── Preview & Edit ────────────────────────────────────────────────────────
@@ -558,10 +681,8 @@ class ANOVAAnalyzer(ctk.CTk):
         win.geometry("1000x780")
         win.configure(fg_color=BG_DEEP)
 
-        # Title bar
         top = ctk.CTkFrame(win, fg_color=BG_CARD, height=56, corner_radius=0)
-        top.pack(fill="x")
-        top.pack_propagate(False)
+        top.pack(fill="x"); top.pack_propagate(False)
         ctk.CTkLabel(top, text="✏️  APA Report Preview & Edit",
                      font=FONT_HEAD, text_color=TEXT_PRI).pack(side="left", padx=20)
 
@@ -570,34 +691,26 @@ class ANOVAAnalyzer(ctk.CTk):
 
         r = self.anova_results
 
-        # ── Header section ────
-        hdr = card(scroll, "Report Header")
-        hdr.pack(fill="x", pady=(0, 12))
-
         def lbl_entry(parent, label, value, width=500):
             row = ctk.CTkFrame(parent, fg_color="transparent")
             row.pack(fill="x", padx=16, pady=4)
             ctk.CTkLabel(row, text=label, font=FONT_TINY, text_color=TEXT_SEC,
                          width=120).pack(side="left")
-            e = styled_entry(row, width=width)
-            e.insert(0, value)
-            e.pack(side="left")
-            return e
+            e = styled_entry(row, width=width); e.insert(0, value)
+            e.pack(side="left"); return e
 
+        hdr = card(scroll, "Report Header"); hdr.pack(fill="x", pady=(0, 12))
         title_e    = lbl_entry(hdr, "Report Title",    r["report_title"])
-        subtitle_e = lbl_entry(hdr, "Subtitle",        r.get("report_subtitle", ""))
-        author_e   = lbl_entry(hdr, "Researcher Name", r.get("researcher_name", ""))
+        subtitle_e = lbl_entry(hdr, "Subtitle",        r.get("report_subtitle",""))
+        author_e   = lbl_entry(hdr, "Researcher Name", r.get("researcher_name",""))
 
-        # ── Table 1: Descriptive ──
-        t1 = card(scroll, "Table 1 — Descriptive Statistics")
-        t1.pack(fill="x", pady=(0, 12))
+        t1 = card(scroll, "Table 1 — Descriptive Statistics"); t1.pack(fill="x", pady=(0,12))
         t1title_e = styled_entry(t1, width=500)
-        t1title_e.insert(0, r.get("desc_table_title", "Descriptive Statistics for Groups"))
-        t1title_e.pack(padx=16, pady=(0, 8))
+        t1title_e.insert(0, r.get("desc_table_title","Descriptive Statistics for Groups"))
+        t1title_e.pack(padx=16, pady=(0,8))
 
-        tbl1 = ctk.CTkFrame(t1, fg_color="transparent")
-        tbl1.pack(padx=16, pady=(0, 12))
-        for col, h in enumerate(["Group", "n", "M", "SD"]):
+        tbl1 = ctk.CTkFrame(t1, fg_color="transparent"); tbl1.pack(padx=16, pady=(0,12))
+        for col, h in enumerate(["Group","n","M","SD"]):
             ctk.CTkLabel(tbl1, text=h, font=FONT_CARD, text_color=ACCENT,
                          width=130).grid(row=0, column=col, padx=4, pady=4)
 
@@ -605,57 +718,49 @@ class ANOVAAnalyzer(ctk.CTk):
         for idx, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
             ge = styled_entry(tbl1, width=130); ge.insert(0, name)
             ge.grid(row=idx, column=0, padx=4, pady=2)
-            ctk.CTkLabel(tbl1, text=str(len(g)), width=130, text_color=TEXT_PRI).grid(row=idx, column=1, padx=4)
-            ctk.CTkLabel(tbl1, text=fmt(np.mean(g)), width=130, text_color=TEXT_PRI).grid(row=idx, column=2, padx=4)
-            ctk.CTkLabel(tbl1, text=fmt(np.std(g, ddof=1)), width=130, text_color=TEXT_PRI).grid(row=idx, column=3, padx=4)
+            ctk.CTkLabel(tbl1, text=str(len(g)), width=130, text_color=TEXT_PRI).grid(row=idx,column=1,padx=4)
+            ctk.CTkLabel(tbl1, text=fmt(np.mean(g)), width=130, text_color=TEXT_PRI).grid(row=idx,column=2,padx=4)
+            ctk.CTkLabel(tbl1, text=fmt(np.std(g,ddof=1)), width=130, text_color=TEXT_PRI).grid(row=idx,column=3,padx=4)
             desc_entries.append(ge)
 
-        # ── Table 2: ANOVA ──
-        t2 = card(scroll, "Table 2 — ANOVA Summary")
-        t2.pack(fill="x", pady=(0, 12))
+        t2 = card(scroll, "Table 2 — ANOVA Summary"); t2.pack(fill="x", pady=(0,12))
         t2title_e = styled_entry(t2, width=500)
-        t2title_e.insert(0, r.get("anova_table_title", "Analysis of Variance Summary Table"))
-        t2title_e.pack(padx=16, pady=(0, 8))
+        t2title_e.insert(0, r.get("anova_table_title","Analysis of Variance Summary Table"))
+        t2title_e.pack(padx=16, pady=(0,8))
 
-        tbl2 = ctk.CTkFrame(t2, fg_color="transparent")
-        tbl2.pack(padx=16, pady=(0, 12))
-        for col, h in enumerate(["Source", "SS", "df", "MS", "F", "p"]):
+        tbl2 = ctk.CTkFrame(t2, fg_color="transparent"); tbl2.pack(padx=16, pady=(0,12))
+        for col, h in enumerate(["Source","SS","df","MS","F","p"]):
             ctk.CTkLabel(tbl2, text=h, font=FONT_CARD, text_color=ACCENT,
                          width=110).grid(row=0, column=col, padx=4)
 
-        between_e = styled_entry(tbl2, width=110); between_e.insert(0, r.get("anova_between_label", "Between Groups"))
+        between_e = styled_entry(tbl2, width=110); between_e.insert(0, r.get("anova_between_label","Between Groups"))
         between_e.grid(row=1, column=0, padx=4, pady=2)
-        for col, val in enumerate([fmt(r["SS_between"]), str(r["df_between"]),
-                                    fmt(r["MS_between"]), fmt(r["F_statistic"]), fmt(r["p_value"])], 1):
-            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=1, column=col, padx=4)
+        for col, val in enumerate([fmt(r["SS_between"]),str(r["df_between"]),
+                                    fmt(r["MS_between"]),fmt(r["F_statistic"]),fmt(r["p_value"])],1):
+            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=1,column=col,padx=4)
 
-        within_e = styled_entry(tbl2, width=110); within_e.insert(0, r.get("anova_within_label", "Within Groups"))
+        within_e = styled_entry(tbl2, width=110); within_e.insert(0, r.get("anova_within_label","Within Groups"))
         within_e.grid(row=2, column=0, padx=4, pady=2)
-        for col, val in enumerate([fmt(r["SS_within"]), str(r["df_within"]), fmt(r["MS_within"])], 1):
-            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=2, column=col, padx=4)
+        for col, val in enumerate([fmt(r["SS_within"]),str(r["df_within"]),fmt(r["MS_within"])],1):
+            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=2,column=col,padx=4)
 
-        total_e = styled_entry(tbl2, width=110); total_e.insert(0, r.get("anova_total_label", "Total"))
+        total_e = styled_entry(tbl2, width=110); total_e.insert(0, r.get("anova_total_label","Total"))
         total_e.grid(row=3, column=0, padx=4, pady=2)
-        for col, val in enumerate([fmt(r["SS_total"]), str(r["df_between"]+r["df_within"])], 1):
-            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=3, column=col, padx=4)
+        for col, val in enumerate([fmt(r["SS_total"]),str(r["df_between"]+r["df_within"])],1):
+            ctk.CTkLabel(tbl2, text=val, width=110, text_color=TEXT_PRI).grid(row=3,column=col,padx=4)
 
-        # ── Post-hoc ──
-        posthoc_text_widget = None
-        posthoc_title_e = None
+        posthoc_text_widget = None; posthoc_title_e = None
         if r["is_significant"] and "tukey" in r:
-            t3 = card(scroll, "Table 3 — Post Hoc (Tukey HSD)")
-            t3.pack(fill="x", pady=(0, 12))
+            t3 = card(scroll, "Table 3 — Post Hoc (Tukey HSD)"); t3.pack(fill="x", pady=(0,12))
             posthoc_title_e = styled_entry(t3, width=500)
-            posthoc_title_e.insert(0, r.get("posthoc_title", "Post Hoc Comparisons (Tukey HSD)"))
-            posthoc_title_e.pack(padx=16, pady=(0, 8))
+            posthoc_title_e.insert(0, r.get("posthoc_title","Post Hoc Comparisons (Tukey HSD)"))
+            posthoc_title_e.pack(padx=16, pady=(0,8))
             posthoc_text_widget = ctk.CTkTextbox(t3, height=150, font=FONT_MONO,
                                                   fg_color=BG_INPUT, text_color=TEXT_PRI)
             posthoc_text_widget.insert("1.0", str(r["tukey"]))
-            posthoc_text_widget.pack(fill="x", padx=16, pady=(0, 12))
+            posthoc_text_widget.pack(fill="x", padx=16, pady=(0,12))
 
-        # ── Conclusion ──
-        tc = card(scroll, "Conclusion & Decision")
-        tc.pack(fill="x", pady=(0, 12))
+        tc = card(scroll, "Conclusion & Decision"); tc.pack(fill="x", pady=(0,12))
         conc_text = ctk.CTkTextbox(tc, height=180, font=FONT_BODY,
                                     fg_color=BG_INPUT, text_color=TEXT_PRI)
         default_conc = (f"Decision: {r['decision']}\n\n"
@@ -663,28 +768,25 @@ class ANOVAAnalyzer(ctk.CTk):
                         f"p = {fmt(r['p_value'])}\n\n"
                         f"Conclusion:\n{r['conclusion']}")
         conc_text.insert("1.0", r.get("conclusion_text", default_conc))
-        conc_text.pack(fill="x", padx=16, pady=(0, 12))
+        conc_text.pack(fill="x", padx=16, pady=(0,12))
 
-        # ── Raw data ──
-        tr = card(scroll, "Table 4 — Raw Data")
-        tr.pack(fill="x", pady=(0, 12))
+        tr = card(scroll, "Table 4 — Raw Data"); tr.pack(fill="x", pady=(0,12))
         ctk.CTkLabel(tr, text="⚠  Editing here won't recompute statistics.",
                      font=FONT_TINY, text_color=WARN).pack(anchor="w", padx=16)
         raw_title_e = styled_entry(tr, width=500)
-        raw_title_e.insert(0, r.get("rawdata_table_title", "Raw Data by Group"))
-        raw_title_e.pack(padx=16, pady=(0, 8))
+        raw_title_e.insert(0, r.get("rawdata_table_title","Raw Data by Group"))
+        raw_title_e.pack(padx=16, pady=(0,8))
 
-        rtbl = ctk.CTkFrame(tr, fg_color="transparent"); rtbl.pack(padx=16, pady=(0, 12))
-        for col, h in enumerate(["Group", "n", "Values"]):
+        rtbl = ctk.CTkFrame(tr, fg_color="transparent"); rtbl.pack(padx=16, pady=(0,12))
+        for col, h in enumerate(["Group","n","Values"]):
             ctk.CTkLabel(rtbl, text=h, font=FONT_CARD, text_color=ACCENT,
                          width=140).grid(row=0, column=col, padx=4)
         raw_entries = []
         for idx, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
             rge = styled_entry(rtbl, width=140); rge.insert(0, name)
             rge.grid(row=idx, column=0, padx=4, pady=2)
-            ctk.CTkLabel(rtbl, text=str(len(g)), width=140, text_color=TEXT_PRI).grid(row=idx, column=1, padx=4)
-            rve = styled_entry(rtbl, width=380)
-            rve.insert(0, ", ".join(fmt(v) for v in g))
+            ctk.CTkLabel(rtbl, text=str(len(g)), width=140, text_color=TEXT_PRI).grid(row=idx,column=1,padx=4)
+            rve = styled_entry(rtbl, width=380); rve.insert(0, ", ".join(fmt(v) for v in g))
             rve.grid(row=idx, column=2, padx=4, pady=2)
             raw_entries.append((rge, rve))
 
@@ -702,17 +804,15 @@ class ANOVAAnalyzer(ctk.CTk):
                 "anova_between_label": between_e.get(),
                 "anova_within_label": within_e.get(),
                 "anova_total_label": total_e.get(),
-                "conclusion_text": conc_text.get("1.0", "end-1c"),
+                "conclusion_text": conc_text.get("1.0","end-1c"),
                 "rawdata_table_title": raw_title_e.get(),
-                "raw_data_edits": [{"group_name": rge.get(), "values_text": rve.get()}
+                "raw_data_edits": [{"group_name": rge.get(),"values_text": rve.get()}
                                     for rge, rve in raw_entries],
                 "edited": True
             })
-            if posthoc_title_e:
-                self.anova_results["posthoc_title"] = posthoc_title_e.get()
-            if posthoc_text_widget:
-                self.anova_results["posthoc_text"] = posthoc_text_widget.get("1.0", "end-1c")
-            messagebox.showinfo("Saved", "Edits saved — will be included in DOCX export.")
+            if posthoc_title_e:  self.anova_results["posthoc_title"] = posthoc_title_e.get()
+            if posthoc_text_widget: self.anova_results["posthoc_text"] = posthoc_text_widget.get("1.0","end-1c")
+            messagebox.showinfo("Saved","Edits saved — will be included in DOCX export.")
             win.destroy()
 
         ctk.CTkButton(scroll, text="💾  Save Edits", command=save_edits,
@@ -737,28 +837,26 @@ class ANOVAAnalyzer(ctk.CTk):
 
         scroll = ctk.CTkScrollableFrame(win, fg_color=BG_DEEP)
         scroll.pack(fill="both", expand=True, padx=16, pady=16)
-        scroll.grid_columnconfigure((0, 1, 2), weight=1)
+        scroll.grid_columnconfigure((0,1,2), weight=1)
 
         r = self.anova_results
         groups = r["groups"]; group_names = r["group_names"]
-        COLORS = ["#00c9a7", "#4e9eff", "#f59e0b", "#a855f7", "#ef4444"]
+        COLORS = ["#00c9a7","#4e9eff","#f59e0b","#a855f7","#ef4444"]
 
         def make_col(parent, col, title, subtitle):
             f = card(parent, "")
             f.grid(row=0, column=col, padx=6, pady=4, sticky="nsew")
-            ctk.CTkLabel(f, text=title, font=FONT_CARD, text_color=TEXT_PRI).pack(pady=(12, 0))
-            ctk.CTkLabel(f, text=subtitle, font=FONT_TINY, text_color=TEXT_SEC).pack(pady=(0, 6))
+            ctk.CTkLabel(f, text=title, font=FONT_CARD, text_color=TEXT_PRI).pack(pady=(12,0))
+            ctk.CTkLabel(f, text=subtitle, font=FONT_TINY, text_color=TEXT_SEC).pack(pady=(0,6))
             return f
 
-        # ── Boxplot ──
         c1 = make_col(scroll, 0, "Distribution", "Median · IQR · Outliers")
-        fig1 = Figure(figsize=(3.8, 4.6), facecolor=BG_CARD)
-        ax1 = fig1.add_subplot(111, facecolor=BG_PANEL)
-        bp = ax1.boxplot(groups, labels=group_names, patch_artist=True,
-                         medianprops=dict(color="#f59e0b", linewidth=2.5),
-                         whiskerprops=dict(color=TEXT_SEC),
-                         capprops=dict(color=TEXT_SEC),
-                         flierprops=dict(marker="o", markerfacecolor=DANGER, markersize=5, alpha=0.6))
+        fig1 = Figure(figsize=(3.8,4.6), facecolor=BG_CARD)
+        ax1  = fig1.add_subplot(111, facecolor=BG_PANEL)
+        bp   = ax1.boxplot(groups, labels=group_names, patch_artist=True,
+                           medianprops=dict(color="#f59e0b", linewidth=2.5),
+                           whiskerprops=dict(color=TEXT_SEC), capprops=dict(color=TEXT_SEC),
+                           flierprops=dict(marker="o", markerfacecolor=DANGER, markersize=5, alpha=0.6))
         for patch, c in zip(bp["boxes"], COLORS):
             patch.set_facecolor(c); patch.set_alpha(0.55)
         ax1.set_xlabel("Groups", color=TEXT_SEC, fontsize=9)
@@ -770,19 +868,18 @@ class ANOVAAnalyzer(ctk.CTk):
         fig1.tight_layout(pad=1.2)
         FigureCanvasTkAgg(fig1, c1).get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
 
-        # ── Bar + error ──
-        c2 = make_col(scroll, 1, "Group Means", "Mean ± SD error bars")
+        c2    = make_col(scroll, 1, "Group Means", "Mean ± SD error bars")
         means = [np.mean(g) for g in groups]
         stds  = [np.std(g, ddof=1) for g in groups]
-        fig2 = Figure(figsize=(3.8, 4.6), facecolor=BG_CARD)
-        ax2 = fig2.add_subplot(111, facecolor=BG_PANEL)
-        xp = np.arange(len(group_names))
-        bars = ax2.bar(xp, means, yerr=stds, capsize=6, width=0.55,
-                       color=COLORS[:len(groups)], alpha=0.80,
-                       ecolor=TEXT_SEC, linewidth=0)
+        fig2  = Figure(figsize=(3.8,4.6), facecolor=BG_CARD)
+        ax2   = fig2.add_subplot(111, facecolor=BG_PANEL)
+        xp    = np.arange(len(group_names))
+        bars  = ax2.bar(xp, means, yerr=stds, capsize=6, width=0.55,
+                        color=COLORS[:len(groups)], alpha=0.80,
+                        ecolor=TEXT_SEC, linewidth=0)
         for bar, m, s in zip(bars, means, stds):
-            ax2.text(bar.get_x() + bar.get_width()/2, m + s + 0.3,
-                     fmt(m), ha="center", va="bottom", color=TEXT_PRI, fontsize=8)
+            ax2.text(bar.get_x()+bar.get_width()/2, m+s+0.3, fmt(m),
+                     ha="center", va="bottom", color=TEXT_PRI, fontsize=8)
         ax2.set_xticks(xp); ax2.set_xticklabels(group_names)
         ax2.tick_params(colors=TEXT_SEC, labelsize=8)
         ax2.spines[["top","right"]].set_visible(False)
@@ -791,13 +888,12 @@ class ANOVAAnalyzer(ctk.CTk):
         fig2.tight_layout(pad=1.2)
         FigureCanvasTkAgg(fig2, c2).get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
 
-        # ── Strip + mean line ──
         c3 = make_col(scroll, 2, "Data Points", "Individual values + mean marker")
-        fig3 = Figure(figsize=(3.8, 4.6), facecolor=BG_CARD)
-        ax3 = fig3.add_subplot(111, facecolor=BG_PANEL)
+        fig3 = Figure(figsize=(3.8,4.6), facecolor=BG_CARD)
+        ax3  = fig3.add_subplot(111, facecolor=BG_PANEL)
         for i, (g, name) in enumerate(zip(groups, group_names)):
-            jx = np.random.normal(i + 1, 0.06, size=len(g))
-            ax3.scatter(jx, g, alpha=0.65, s=28, color=COLORS[i % len(COLORS)],
+            jx = np.random.normal(i+1, 0.06, size=len(g))
+            ax3.scatter(jx, g, alpha=0.65, s=28, color=COLORS[i%len(COLORS)],
                         edgecolors="white", linewidth=0.4)
             mn = np.mean(g)
             ax3.plot([i+0.65, i+1.35], [mn, mn], color="#f59e0b", linewidth=3)
@@ -817,7 +913,7 @@ class ANOVAAnalyzer(ctk.CTk):
                       width=100, height=32, corner_radius=6,
                       fg_color=BG_PANEL, hover_color=BORDER).pack(side="right", padx=8)
 
-    # ── Save DOCX ─────────────────────────────────────────────────────────────
+    # ── Save single DOCX (unchanged) ──────────────────────────────────────────
 
     def save_to_docx(self):
         if not self.anova_results:
@@ -840,33 +936,23 @@ class ANOVAAnalyzer(ctk.CTk):
                 section.left_margin   = Inches(0.65)
                 section.right_margin  = Inches(0.65)
 
-            # ── APA border helper ──
             def apa_borders(table):
-                tbl = table._tbl
-                tblPr = tbl.tblPr
+                tbl = table._tbl; tblPr = tbl.tblPr
                 tb = OxmlElement("w:tblBorders")
                 for bn in ["top","left","bottom","right","insideH","insideV"]:
-                    b = OxmlElement(f"w:{bn}")
-                    b.set(qn("w:val"), "none")
-                    tb.append(b)
+                    b = OxmlElement(f"w:{bn}"); b.set(qn("w:val"), "none"); tb.append(b)
                 for bn, sz in [("top","12"), ("bottom","12")]:
                     b = OxmlElement(f"w:{bn}")
-                    b.set(qn("w:val"), "single")
-                    b.set(qn("w:sz"), sz)
-                    tb.append(b)
+                    b.set(qn("w:val"), "single"); b.set(qn("w:sz"), sz); tb.append(b)
                 tblPr.append(tb)
 
             def add_header_sep(table):
-                """Add thin bottom border to header row cells"""
                 for cell in table.rows[0].cells:
-                    tc = cell._tc
-                    tcPr = tc.get_or_add_tcPr()
+                    tc = cell._tc; tcPr = tc.get_or_add_tcPr()
                     tcBorders = OxmlElement("w:tcBorders")
                     bot = OxmlElement("w:bottom")
-                    bot.set(qn("w:val"), "single")
-                    bot.set(qn("w:sz"), "6")
-                    tcBorders.append(bot)
-                    tcPr.append(tcBorders)
+                    bot.set(qn("w:val"), "single"); bot.set(qn("w:sz"), "6")
+                    tcBorders.append(bot); tcPr.append(tcBorders)
 
             def cell_fmt(cell, text, bold=False, italic=False,
                           size=9, align="left", color=None):
@@ -874,16 +960,13 @@ class ANOVAAnalyzer(ctk.CTk):
                 para.alignment = (WD_PARAGRAPH_ALIGNMENT.CENTER
                                    if align == "center" else WD_PARAGRAPH_ALIGNMENT.LEFT)
                 run = para.add_run(text)
-                run.font.size = Pt(size)
-                run.bold = bold; run.italic = italic
-                if color:
-                    run.font.color.rgb = RGBColor(*color)
+                run.font.size = Pt(size); run.bold = bold; run.italic = italic
+                if color: run.font.color.rgb = RGBColor(*color)
 
-            # ── TITLE ──
             title_p = doc.add_heading(r["report_title"], 1)
             title_p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             for run in title_p.runs:
-                run.font.size = Pt(14); run.bold = True; run.font.color.rgb = RGBColor(0, 0, 0)
+                run.font.size = Pt(14); run.bold = True; run.font.color.rgb = RGBColor(0,0,0)
 
             if r.get("report_subtitle"):
                 sp = doc.add_paragraph(r["report_subtitle"])
@@ -895,44 +978,37 @@ class ANOVAAnalyzer(ctk.CTk):
                 np_.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                 for run in np_.runs: run.italic = True; run.font.size = Pt(10)
 
-            # ── 2-column section ──
-            s = doc.sections[0]
-            sp = s._sectPr
-            cols_el = sp.xpath("./w:cols")
-            cols_el = cols_el[0] if cols_el else OxmlElement("w:cols")
-            cols_el.set(qn("w:num"), "2")
-            cols_el.set(qn("w:space"), "720")
-            if not sp.xpath("./w:cols"):
-                sp.append(cols_el)
+            s = doc.sections[0]; sp2 = s._sectPr
+            cols_el = sp2.find(qn("w:cols"))
+            if cols_el is None:
+                cols_el = OxmlElement("w:cols")
+                sp2.append(cols_el)
+            cols_el.set(qn("w:num"), "2"); cols_el.set(qn("w:space"), "720")
 
             doc.add_paragraph()
 
-            # ── Table 1: Descriptive ──
-            p = doc.add_paragraph()
-            p.add_run("Table 1\n").bold = True
+            p = doc.add_paragraph(); p.add_run("Table 1\n").bold = True
             p.runs[0].font.size = Pt(10)
-            tp = doc.add_paragraph(r.get("desc_table_title", "Descriptive Statistics for Groups"))
+            tp = doc.add_paragraph(r.get("desc_table_title","Descriptive Statistics for Groups"))
             tp.runs[0].italic = True; tp.runs[0].font.size = Pt(9)
 
-            dt = doc.add_table(rows=len(r["groups"]) + 1, cols=4)
+            dt = doc.add_table(rows=len(r["groups"])+1, cols=4)
             apa_borders(dt)
-            for cw, cell in zip([1.0, 0.5, 0.7, 0.7], dt.rows[0].cells):
+            for cw, cell in zip([1.0,0.5,0.7,0.7], dt.rows[0].cells):
                 cell.width = Inches(cw)
             for i, h in enumerate(["Group","n","M","SD"]):
                 cell_fmt(dt.rows[0].cells[i], h, bold=True, size=9, align="center")
             add_header_sep(dt)
-
             for i, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
-                row = dt.rows[i]
-                cell_fmt(row.cells[0], name, size=9)
-                cell_fmt(row.cells[1], str(len(g)), size=9, align="center")
-                cell_fmt(row.cells[2], fmt(np.mean(g)), size=9, align="center")
-                cell_fmt(row.cells[3], fmt(np.std(g, ddof=1)), size=9, align="center")
+                row_ = dt.rows[i]
+                cell_fmt(row_.cells[0], name, size=9)
+                cell_fmt(row_.cells[1], str(len(g)), size=9, align="center")
+                cell_fmt(row_.cells[2], fmt(np.mean(g)), size=9, align="center")
+                cell_fmt(row_.cells[3], fmt(np.std(g,ddof=1)), size=9, align="center")
 
             doc.add_paragraph()
 
-            # ── Table 2: ANOVA ──
-            tp2 = doc.add_paragraph(r.get("anova_table_title", "Analysis of Variance Summary Table"))
+            tp2 = doc.add_paragraph(r.get("anova_table_title","Analysis of Variance Summary Table"))
             tp2.runs[0].italic = True; tp2.runs[0].font.size = Pt(9)
 
             at = doc.add_table(rows=4, cols=6)
@@ -942,27 +1018,24 @@ class ANOVAAnalyzer(ctk.CTk):
             add_header_sep(at)
 
             row1 = at.rows[1]
-            cell_fmt(row1.cells[0], r.get("anova_between_label", "Between Groups"), size=9)
-            for col, val in enumerate([fmt(r["SS_between"]), str(r["df_between"]),
-                                        fmt(r["MS_between"]), fmt(r["F_statistic"]), fmt(r["p_value"])], 1):
+            cell_fmt(row1.cells[0], r.get("anova_between_label","Between Groups"), size=9)
+            for col, val in enumerate([fmt(r["SS_between"]),str(r["df_between"]),
+                                        fmt(r["MS_between"]),fmt(r["F_statistic"]),fmt(r["p_value"])],1):
                 cell_fmt(row1.cells[col], val, size=9, align="center")
 
             row2 = at.rows[2]
-            cell_fmt(row2.cells[0], r.get("anova_within_label", "Within Groups"), size=9)
-            for col, val in enumerate([fmt(r["SS_within"]), str(r["df_within"]), fmt(r["MS_within"])], 1):
+            cell_fmt(row2.cells[0], r.get("anova_within_label","Within Groups"), size=9)
+            for col, val in enumerate([fmt(r["SS_within"]),str(r["df_within"]),fmt(r["MS_within"])],1):
                 cell_fmt(row2.cells[col], val, size=9, align="center")
 
             row3 = at.rows[3]
-            cell_fmt(row3.cells[0], r.get("anova_total_label", "Total"), size=9)
-            for col, val in enumerate([fmt(r["SS_total"]),
-                                        str(r["df_between"] + r["df_within"])], 1):
+            cell_fmt(row3.cells[0], r.get("anova_total_label","Total"), size=9)
+            for col, val in enumerate([fmt(r["SS_total"]),str(r["df_between"]+r["df_within"])],1):
                 cell_fmt(row3.cells[col], val, size=9, align="center")
 
             doc.add_paragraph()
 
-            # ── Results paragraph ──
-            rh = doc.add_paragraph()
-            rh.add_run("Test Results\n").bold = True
+            rh = doc.add_paragraph(); rh.add_run("Test Results\n").bold = True
             rh.runs[0].font.size = Pt(10)
 
             if r.get("edited") and "conclusion_text" in r:
@@ -973,28 +1046,25 @@ class ANOVAAnalyzer(ctk.CTk):
                 cp.add_run(f"F({r['df_between']}, {r['df_within']}) = ")
                 fr = cp.add_run(fmt(r["F_statistic"])); fr.bold = True
                 cp.add_run(", p = ")
-                pr = cp.add_run(fmt(r["p_value"])); pr.bold = True
+                pr_ = cp.add_run(fmt(r["p_value"])); pr_.bold = True
                 cp.add_run("\n\nDecision: ")
                 dr = cp.add_run(r["decision"]); dr.bold = True
                 cp.add_run(f"\n\n{r['conclusion']}")
                 for run in cp.runs: run.font.size = Pt(9)
 
-            # ── Post-hoc ──
             if r["is_significant"] and "tukey" in r:
                 doc.add_paragraph()
-                php = doc.add_paragraph(r.get("posthoc_title", "Post Hoc Comparisons (Tukey HSD)"))
+                php = doc.add_paragraph(r.get("posthoc_title","Post Hoc Comparisons (Tukey HSD)"))
                 php.runs[0].italic = True; php.runs[0].font.size = Pt(9)
                 phtext = r.get("posthoc_text", str(r["tukey"]))
                 pph = doc.add_paragraph(phtext)
-                for run in pph.runs:
-                    run.font.name = "Courier New"; run.font.size = Pt(7)
+                for run in pph.runs: run.font.name = "Courier New"; run.font.size = Pt(7)
 
-            # ── Raw data table ──
             doc.add_paragraph()
-            rdt_title = doc.add_paragraph(r.get("rawdata_table_title", "Raw Data by Group"))
+            rdt_title = doc.add_paragraph(r.get("rawdata_table_title","Raw Data by Group"))
             rdt_title.runs[0].italic = True; rdt_title.runs[0].font.size = Pt(9)
 
-            rdt = doc.add_table(rows=len(r["groups"]) + 1, cols=3)
+            rdt = doc.add_table(rows=len(r["groups"])+1, cols=3)
             apa_borders(rdt)
             for i, h in enumerate(["Group","n","Values"]):
                 cell_fmt(rdt.rows[0].cells[i], h, bold=True, size=8, align="center")
@@ -1002,30 +1072,27 @@ class ANOVAAnalyzer(ctk.CTk):
 
             if "raw_data_edits" in r:
                 for i, edit in enumerate(r["raw_data_edits"], 1):
-                    row = rdt.rows[i]
-                    cell_fmt(row.cells[0], edit["group_name"], size=7)
+                    row_ = rdt.rows[i]
+                    cell_fmt(row_.cells[0], edit["group_name"], size=7)
                     n_c = len(edit["values_text"].split(","))
-                    cell_fmt(row.cells[1], str(n_c), size=7, align="center")
+                    cell_fmt(row_.cells[1], str(n_c), size=7, align="center")
                     vt = edit["values_text"]
                     if len(vt) > 60: vt = vt[:57] + "…"
-                    cell_fmt(row.cells[2], vt, size=7)
+                    cell_fmt(row_.cells[2], vt, size=7)
             else:
                 for i, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
-                    row = rdt.rows[i]
-                    cell_fmt(row.cells[0], name, size=7)
-                    cell_fmt(row.cells[1], str(len(g)), size=7, align="center")
+                    row_ = rdt.rows[i]
+                    cell_fmt(row_.cells[0], name, size=7)
+                    cell_fmt(row_.cells[1], str(len(g)), size=7, align="center")
                     vs = ", ".join(fmt(v) for v in g)
                     if len(vs) > 60: vs = vs[:57] + "…"
-                    cell_fmt(row.cells[2], vs, size=7)
+                    cell_fmt(row_.cells[2], vs, size=7)
 
             doc.add_paragraph()
-
-            # ── Footer ──
-            fp = doc.add_paragraph()
-            fr1 = fp.add_run(f"Saved: {os.path.abspath(filepath)}\n")
-            fr1.font.size = Pt(7); fr1.font.color.rgb = RGBColor(128, 128, 128); fr1.italic = True
-            fr2 = fp.add_run(f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}")
-            fr2.font.size = Pt(7); fr2.font.color.rgb = RGBColor(128, 128, 128); fr2.italic = True
+            fp2 = doc.add_paragraph()
+            fr1.font.size = Pt(7); fr1.font.color.rgb = RGBColor(128,128,128); fr1.italic = True
+            fr2 = fp2.add_run(f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}")
+            fr2.font.size = Pt(7); fr2.font.color.rgb = RGBColor(128,128,128); fr2.italic = True
 
             doc.save(filepath)
             self.file_label.configure(text=f"Last saved: {filepath}")
@@ -1033,7 +1100,8 @@ class ANOVAAnalyzer(ctk.CTk):
             messagebox.showinfo("Saved", f"APA report saved successfully!\n\n{filepath}")
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save document:\n{e}") 
+            messagebox.showerror("Error", f"Failed to save document:\n{e}")
+
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
