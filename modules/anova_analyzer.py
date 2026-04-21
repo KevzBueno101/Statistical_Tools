@@ -52,11 +52,10 @@ def fmt(val, decimals=2):
     return f"{round(float(val), decimals):.{decimals}f}"
 
 
-class Sidebar(ctk.CTkFrame):
+class Sidebar(ctk.CTkScrollableFrame):
     def __init__(self, master, **kw):
-        super().__init__(master, width=220, fg_color=BG_CARD,
+        super().__init__(master, fg_color=BG_CARD,
                          corner_radius=0, **kw)
-        self.pack_propagate(False)
         self._build()
 
     def _build(self):
@@ -955,7 +954,7 @@ class ANOVAAnalyzer(ctk.CTk):
                     tcBorders.append(bot); tcPr.append(tcBorders)
 
             def cell_fmt(cell, text, bold=False, italic=False,
-                          size=9, align="left", color=None):
+                          size=11, align="left", color=None):
                 para = cell.paragraphs[0]
                 para.alignment = (WD_PARAGRAPH_ALIGNMENT.CENTER
                                    if align == "center" else WD_PARAGRAPH_ALIGNMENT.LEFT)
@@ -966,81 +965,81 @@ class ANOVAAnalyzer(ctk.CTk):
             title_p = doc.add_heading(r["report_title"], 1)
             title_p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             for run in title_p.runs:
-                run.font.size = Pt(14); run.bold = True; run.font.color.rgb = RGBColor(0,0,0)
+                run.font.size = Pt(18); run.bold = True; run.font.color.rgb = RGBColor(0,0,0)
 
             if r.get("report_subtitle"):
                 sp = doc.add_paragraph(r["report_subtitle"])
                 sp.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                for run in sp.runs: run.italic = True; run.font.size = Pt(11)
+                for run in sp.runs: run.italic = True; run.font.size = Pt(12)
 
             if r.get("researcher_name"):
                 np_ = doc.add_paragraph(r["researcher_name"])
                 np_.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                for run in np_.runs: run.italic = True; run.font.size = Pt(10)
+                for run in np_.runs: run.italic = True; run.font.size = Pt(11)
 
             s = doc.sections[0]; sp2 = s._sectPr
             cols_el = sp2.find(qn("w:cols"))
             if cols_el is None:
                 cols_el = OxmlElement("w:cols")
+                cols_el.set(qn("w:num"), "2"); cols_el.set(qn("w:space"), "720")
                 sp2.append(cols_el)
-            cols_el.set(qn("w:num"), "2"); cols_el.set(qn("w:space"), "720")
 
             doc.add_paragraph()
 
             p = doc.add_paragraph(); p.add_run("Table 1\n").bold = True
-            p.runs[0].font.size = Pt(10)
+            p.runs[0].font.size = Pt(12)
             tp = doc.add_paragraph(r.get("desc_table_title","Descriptive Statistics for Groups"))
-            tp.runs[0].italic = True; tp.runs[0].font.size = Pt(9)
+            tp.runs[0].italic = True; tp.runs[0].font.size = Pt(11)
 
             dt = doc.add_table(rows=len(r["groups"])+1, cols=4)
             apa_borders(dt)
             for cw, cell in zip([1.0,0.5,0.7,0.7], dt.rows[0].cells):
                 cell.width = Inches(cw)
             for i, h in enumerate(["Group","n","M","SD"]):
-                cell_fmt(dt.rows[0].cells[i], h, bold=True, size=9, align="center")
+                cell_fmt(dt.rows[0].cells[i], h, bold=True, size=11, align="center")
             add_header_sep(dt)
             for i, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
                 row_ = dt.rows[i]
-                cell_fmt(row_.cells[0], name, size=9)
-                cell_fmt(row_.cells[1], str(len(g)), size=9, align="center")
-                cell_fmt(row_.cells[2], fmt(np.mean(g)), size=9, align="center")
-                cell_fmt(row_.cells[3], fmt(np.std(g,ddof=1)), size=9, align="center")
+                cell_fmt(row_.cells[0], name, size=11)
+                cell_fmt(row_.cells[1], str(len(g)), size=11, align="center")
+                cell_fmt(row_.cells[2], fmt(np.mean(g)), size=11, align="center")
+                cell_fmt(row_.cells[3], fmt(np.std(g,ddof=1)), size=11, align="center")
 
             doc.add_paragraph()
 
             tp2 = doc.add_paragraph(r.get("anova_table_title","Analysis of Variance Summary Table"))
-            tp2.runs[0].italic = True; tp2.runs[0].font.size = Pt(9)
+            tp2.runs[0].italic = True; tp2.runs[0].font.size = Pt(11)
 
             at = doc.add_table(rows=4, cols=6)
             apa_borders(at)
             for i, h in enumerate(["Source","SS","df","MS","F","p"]):
-                cell_fmt(at.rows[0].cells[i], h, bold=True, size=9, align="center")
+                cell_fmt(at.rows[0].cells[i], h, bold=True, size=11, align="center")
             add_header_sep(at)
 
             row1 = at.rows[1]
-            cell_fmt(row1.cells[0], r.get("anova_between_label","Between Groups"), size=9)
+            cell_fmt(row1.cells[0], r.get("anova_between_label","Between Groups"), size=11)
             for col, val in enumerate([fmt(r["SS_between"]),str(r["df_between"]),
                                         fmt(r["MS_between"]),fmt(r["F_statistic"]),fmt(r["p_value"])],1):
-                cell_fmt(row1.cells[col], val, size=9, align="center")
+                cell_fmt(row1.cells[col], val, size=11, align="center")
 
             row2 = at.rows[2]
-            cell_fmt(row2.cells[0], r.get("anova_within_label","Within Groups"), size=9)
+            cell_fmt(row2.cells[0], r.get("anova_within_label","Within Groups"), size=11)
             for col, val in enumerate([fmt(r["SS_within"]),str(r["df_within"]),fmt(r["MS_within"])],1):
-                cell_fmt(row2.cells[col], val, size=9, align="center")
+                cell_fmt(row2.cells[col], val, size=11, align="center")
 
             row3 = at.rows[3]
-            cell_fmt(row3.cells[0], r.get("anova_total_label","Total"), size=9)
+            cell_fmt(row3.cells[0], r.get("anova_total_label","Total"), size=11)
             for col, val in enumerate([fmt(r["SS_total"]),str(r["df_between"]+r["df_within"])],1):
-                cell_fmt(row3.cells[col], val, size=9, align="center")
+                cell_fmt(row3.cells[col], val, size=11, align="center")
 
             doc.add_paragraph()
 
             rh = doc.add_paragraph(); rh.add_run("Test Results\n").bold = True
-            rh.runs[0].font.size = Pt(10)
+            rh.runs[0].font.size = Pt(12)
 
             if r.get("edited") and "conclusion_text" in r:
                 cp = doc.add_paragraph(r["conclusion_text"])
-                for run in cp.runs: run.font.size = Pt(9)
+                for run in cp.runs: run.font.size = Pt(11)
             else:
                 cp = doc.add_paragraph()
                 cp.add_run(f"F({r['df_between']}, {r['df_within']}) = ")
@@ -1050,55 +1049,57 @@ class ANOVAAnalyzer(ctk.CTk):
                 cp.add_run("\n\nDecision: ")
                 dr = cp.add_run(r["decision"]); dr.bold = True
                 cp.add_run(f"\n\n{r['conclusion']}")
-                for run in cp.runs: run.font.size = Pt(9)
+                for run in cp.runs: run.font.size = Pt(11)
 
             if r["is_significant"] and "tukey" in r:
                 doc.add_paragraph()
                 php = doc.add_paragraph(r.get("posthoc_title","Post Hoc Comparisons (Tukey HSD)"))
-                php.runs[0].italic = True; php.runs[0].font.size = Pt(9)
+                php.runs[0].italic = True; php.runs[0].font.size = Pt(11)
                 phtext = r.get("posthoc_text", str(r["tukey"]))
                 pph = doc.add_paragraph(phtext)
-                for run in pph.runs: run.font.name = "Courier New"; run.font.size = Pt(7)
+                for run in pph.runs: run.font.name = "Courier New"; run.font.size = Pt(9)
 
             doc.add_paragraph()
             rdt_title = doc.add_paragraph(r.get("rawdata_table_title","Raw Data by Group"))
-            rdt_title.runs[0].italic = True; rdt_title.runs[0].font.size = Pt(9)
+            rdt_title.runs[0].italic = True; rdt_title.runs[0].font.size = Pt(11)
 
             rdt = doc.add_table(rows=len(r["groups"])+1, cols=3)
             apa_borders(rdt)
+
             for i, h in enumerate(["Group","n","Values"]):
-                cell_fmt(rdt.rows[0].cells[i], h, bold=True, size=8, align="center")
+                cell_fmt(rdt.rows[0].cells[i], h, bold=True, size=10, align="center")
             add_header_sep(rdt)
 
             if "raw_data_edits" in r:
                 for i, edit in enumerate(r["raw_data_edits"], 1):
                     row_ = rdt.rows[i]
-                    cell_fmt(row_.cells[0], edit["group_name"], size=7)
+                    cell_fmt(row_.cells[0], edit["group_name"], size=9)
                     n_c = len(edit["values_text"].split(","))
-                    cell_fmt(row_.cells[1], str(n_c), size=7, align="center")
+                    cell_fmt(row_.cells[1], str(n_c), size=9, align="center")
                     vt = edit["values_text"]
                     if len(vt) > 60: vt = vt[:57] + "…"
-                    cell_fmt(row_.cells[2], vt, size=7)
+                    cell_fmt(row_.cells[2], vt, size=9)
             else:
                 for i, (name, g) in enumerate(zip(r["group_names"], r["groups"]), 1):
                     row_ = rdt.rows[i]
-                    cell_fmt(row_.cells[0], name, size=7)
-                    cell_fmt(row_.cells[1], str(len(g)), size=7, align="center")
+                    cell_fmt(row_.cells[0], name, size=9)
+                    cell_fmt(row_.cells[1], str(len(g)), size=9, align="center")
                     vs = ", ".join(fmt(v) for v in g)
                     if len(vs) > 60: vs = vs[:57] + "…"
-                    cell_fmt(row_.cells[2], vs, size=7)
+                    cell_fmt(row_.cells[2], vs, size=9)
 
             doc.add_paragraph()
             fp2 = doc.add_paragraph()
-            fr1.font.size = Pt(7); fr1.font.color.rgb = RGBColor(128,128,128); fr1.italic = True
+            fr1.font.size = Pt(9); fr1.font.color.rgb = RGBColor(128,128,128); fr1.italic = True
             fr2 = fp2.add_run(f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}")
-            fr2.font.size = Pt(7); fr2.font.color.rgb = RGBColor(128,128,128); fr2.italic = True
+            fr2.font.size = Pt(9); fr2.font.color.rgb = RGBColor(128,128,128); fr2.italic = True
 
             doc.save(filepath)
             self.file_label.configure(text=f"Last saved: {filepath}")
             self.sidebar.status_label.configure(text=f"✓ Saved\n{os.path.basename(filepath)}")
             messagebox.showinfo("Saved", f"APA report saved successfully!\n\n{filepath}")
 
+# ... (rest of the code remains the same)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save document:\n{e}")
 

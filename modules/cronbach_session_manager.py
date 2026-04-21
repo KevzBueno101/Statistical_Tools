@@ -36,7 +36,7 @@ FONT_MONO = ("Consolas", 9)
 FONT_TINY = ("Segoe UI", 9)
 
 
-# ── Label generator (FIXED) ───────────────────────────────────────────────────
+# ── Label generator ───────────────────────────────────────────────────────────
 
 def _next_part_label(existing_labels: list, current_label: str = None) -> str:
     """
@@ -99,7 +99,7 @@ def _interp_color(interp: str) -> str:
 # ── Part Card ─────────────────────────────────────────────────────────────────
 
 class PartCard(ctk.CTkFrame):
-    """One row in the session panel — mirrors ANOVA PartCard."""
+    """One row in the session panel."""
 
     def __init__(self, master, part_data: dict, index: int,
                  on_delete, on_view, **kw):
@@ -124,7 +124,8 @@ class PartCard(ctk.CTkFrame):
         ic = _interp_color(interp)
         ctk.CTkLabel(top, text=interp,
                      font=FONT_TINY,
-                     fg_color=ic, text_color="#fff" if interp != "Excellent" else "#0d1117",
+                     fg_color=ic,
+                     text_color="#fff" if interp != "Excellent" else "#0d1117",
                      corner_radius=4, padx=6, pady=2).pack(side="left", padx=6)
 
         # Delete button
@@ -189,9 +190,13 @@ class SessionManagerPanel(ctk.CTkToplevel):
     def _build(self):
         # Header
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0, height=52)
-        hdr.pack(fill="x"); hdr.pack_propagate(False)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
         ctk.CTkLabel(hdr, text="📁  Session Manager",
                      font=FONT_HEAD, text_color=TEXT_PRI).pack(side="left", padx=16)
+
+        # FIX: create count_label before packing it
         self.count_label = ctk.CTkLabel(hdr,
                      text=f"{len(self.saved_parts)} part(s) saved",
                      font=FONT_TINY, text_color=TEXT_SEC)
@@ -205,7 +210,8 @@ class SessionManagerPanel(ctk.CTkToplevel):
 
         # Export / close buttons
         btn_frame = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0, height=68)
-        btn_frame.pack(fill="x"); btn_frame.pack_propagate(False)
+        btn_frame.pack(fill="x")
+        btn_frame.pack_propagate(False)
 
         ctk.CTkButton(btn_frame, text="📄  Export All → DOCX",
                       fg_color="#1d4ed8", hover_color="#1e3a8a",
@@ -261,7 +267,8 @@ class ViewPartWindow(ctk.CTkToplevel):
         self.configure(fg_color=BG_DEEP)
 
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0, height=48)
-        hdr.pack(fill="x"); hdr.pack_propagate(False)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
         ctk.CTkLabel(hdr,
                      text=f"  {part_data['label']}  —  {part_data.get('report_title', '')}",
                      font=FONT_CARD, text_color=TEXT_PRI).pack(side="left", padx=12)
@@ -283,8 +290,10 @@ def _build_part_summary(r: dict) -> str:
     line = "─" * 52
     out  = f"{r.get('label', '')}\n{line}\n"
     out += f"{r.get('report_title', '')}\n"
-    if r.get("report_subtitle"): out += f"{r['report_subtitle']}\n"
-    if r.get("researcher_name"): out += f"by: {r['researcher_name']}\n"
+    if r.get("report_subtitle"):
+        out += f"{r['report_subtitle']}\n"
+    if r.get("researcher_name"):
+        out += f"by: {r['researcher_name']}\n"
     out += f"{line}\n\n"
 
     out += "RELIABILITY COEFFICIENT\n" + "─" * 28 + "\n"
@@ -345,9 +354,10 @@ def export_all_to_docx(parts: list, filepath: str):
         sPr  = OxmlElement("w:sectPr")
 
         pg_mar = OxmlElement("w:pgMar")
-        for attr, val in [("w:top","864"),("w:bottom","864"),
-                           ("w:left","936"),("w:right","936"),
-                           ("w:header","720"),("w:footer","720"),("w:gutter","0")]:
+        for attr, val in [("w:top",    "864"), ("w:bottom", "864"),
+                           ("w:left",   "936"), ("w:right",  "936"),
+                           ("w:header", "720"), ("w:footer", "720"),
+                           ("w:gutter", "0")]:
             pg_mar.set(qn(attr), val)
         sPr.append(pg_mar)
 
@@ -365,30 +375,41 @@ def export_all_to_docx(parts: list, filepath: str):
         doc.element.body.append(p_el)
 
     def apa_borders(table):
-        tbl = table._tbl; tblPr = tbl.tblPr
-        tb  = OxmlElement("w:tblBorders")
-        for bn in ["top","left","bottom","right","insideH","insideV"]:
-            b = OxmlElement(f"w:{bn}"); b.set(qn("w:val"), "none"); tb.append(b)
-        for bn, sz in [("top","12"),("bottom","12")]:
+        tbl  = table._tbl
+        tblPr = tbl.tblPr
+        tb   = OxmlElement("w:tblBorders")
+        for bn in ["top", "left", "bottom", "right", "insideH", "insideV"]:
             b = OxmlElement(f"w:{bn}")
-            b.set(qn("w:val"), "single"); b.set(qn("w:sz"), sz); tb.append(b)
+            b.set(qn("w:val"), "none")
+            tb.append(b)
+        for bn, sz in [("top", "12"), ("bottom", "12")]:
+            b = OxmlElement(f"w:{bn}")
+            b.set(qn("w:val"), "single")
+            b.set(qn("w:sz"), sz)
+            tb.append(b)
         tblPr.append(tb)
 
     def add_header_sep(table):
         for cell in table.rows[0].cells:
-            tc = cell._tc; tcPr = tc.get_or_add_tcPr()
+            tc    = cell._tc
+            tcPr  = tc.get_or_add_tcPr()
             tcBorders = OxmlElement("w:tcBorders")
-            bot = OxmlElement("w:bottom")
-            bot.set(qn("w:val"), "single"); bot.set(qn("w:sz"), "6")
-            tcBorders.append(bot); tcPr.append(tcBorders)
+            bot   = OxmlElement("w:bottom")
+            bot.set(qn("w:val"), "single")
+            bot.set(qn("w:sz"), "6")
+            tcBorders.append(bot)
+            tcPr.append(tcBorders)
 
     def cf(cell, text, bold=False, italic=False, size=9, align="left", color=None):
         para = cell.paragraphs[0]
         para.alignment = (WD_PARAGRAPH_ALIGNMENT.CENTER
                           if align == "center" else WD_PARAGRAPH_ALIGNMENT.LEFT)
         run = para.add_run(str(text))
-        run.font.size = Pt(size); run.bold = bold; run.italic = italic
-        if color: run.font.color.rgb = RGBColor(*color)
+        run.font.size = Pt(size)
+        run.bold      = bold
+        run.italic    = italic
+        if color:
+            run.font.color.rgb = RGBColor(*color)
 
     doc = Document()
     _set_section_margins(doc.sections[0])
@@ -401,32 +422,42 @@ def export_all_to_docx(parts: list, filepath: str):
         lp = doc.add_heading(r.get("label", f"Part {part_idx + 1}"), level=1)
         lp.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
         for run in lp.runs:
-            run.font.size = Pt(13); run.bold = True
+            run.font.size      = Pt(13)
+            run.bold           = True
             run.font.color.rgb = RGBColor(0, 0, 0)
 
         tp = doc.add_paragraph(r.get("report_title", "Unidimensional Reliability"))
         tp.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        for run in tp.runs: run.bold = True; run.font.size = Pt(14)
+        for run in tp.runs:
+            run.bold           = True
+            run.font.size      = Pt(14)
 
         if r.get("report_subtitle"):
             sp = doc.add_paragraph(r["report_subtitle"])
             sp.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            for run in sp.runs: run.italic = True; run.font.size = Pt(11)
+            for run in sp.runs:
+                run.italic    = True
+                run.font.size = Pt(11)
 
         if r.get("researcher_name"):
             np_ = doc.add_paragraph(r["researcher_name"])
             np_.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            for run in np_.runs: run.italic = True; run.font.size = Pt(10)
+            for run in np_.runs:
+                run.italic    = True
+                run.font.size = Pt(10)
 
         doc.add_paragraph()
 
         if r.get("description"):
             dp = doc.add_paragraph(r["description"])
-            for run in dp.runs: run.font.size = Pt(9)
+            for run in dp.runs:
+                run.font.size = Pt(9)
             doc.add_paragraph()
 
         ti = doc.add_paragraph("Frequentist Scale Reliability Statistics")
-        if ti.runs: ti.runs[0].italic = True; ti.runs[0].font.size = Pt(9)
+        if ti.runs:
+            ti.runs[0].italic    = True
+            ti.runs[0].font.size = Pt(9)
 
         tbl = doc.add_table(rows=3, cols=5)
         apa_borders(tbl)
@@ -440,25 +471,27 @@ def export_all_to_docx(parts: list, filepath: str):
             cf(tbl.rows[1].cells[i], h, bold=True, size=8, align="center")
         add_header_sep(tbl)
 
-        cf(tbl.rows[2].cells[0], "Coefficient α",           size=9)
-        cf(tbl.rows[2].cells[1], _fmt(r.get("alpha")),      size=9, align="center")
-        cf(tbl.rows[2].cells[2], _fmt(r.get("std_error")),  size=9, align="center")
-        cf(tbl.rows[2].cells[3], _fmt(r.get("ci_lower")),   size=9, align="center")
-        cf(tbl.rows[2].cells[4], _fmt(r.get("ci_upper")),   size=9, align="center")
+        cf(tbl.rows[2].cells[0], "Coefficient α",          size=9)
+        cf(tbl.rows[2].cells[1], _fmt(r.get("alpha")),     size=9, align="center")
+        cf(tbl.rows[2].cells[2], _fmt(r.get("std_error")), size=9, align="center")
+        cf(tbl.rows[2].cells[3], _fmt(r.get("ci_lower")),  size=9, align="center")
+        cf(tbl.rows[2].cells[4], _fmt(r.get("ci_upper")),  size=9, align="center")
 
         doc.add_paragraph()
 
         st_title = doc.add_paragraph("Summary Statistics")
-        if st_title.runs: st_title.runs[0].italic = True; st_title.runs[0].font.size = Pt(9)
+        if st_title.runs:
+            st_title.runs[0].italic    = True
+            st_title.runs[0].font.size = Pt(9)
 
         st = doc.add_table(rows=5, cols=2)
         apa_borders(st)
         rows_data = [
-            ("Statistic",                    "Value",                          True),
-            ("Number of Items",              str(r.get("n_items", "—")),        False),
-            ("Number of Respondents",        str(r.get("n_respondents", "—")),  False),
-            ("Average Inter-item Corr.",     _fmt(r.get("avg_interitem_corr")), False),
-            ("Reliability Interpretation",   r.get("interpretation", "—"),      False),
+            ("Statistic",               "Value",                           True),
+            ("Number of Items",         str(r.get("n_items", "—")),        False),
+            ("Number of Respondents",   str(r.get("n_respondents", "—")),  False),
+            ("Average Inter-item Corr.",_fmt(r.get("avg_interitem_corr")), False),
+            ("Reliability Interpretation", r.get("interpretation", "—"),   False),
         ]
         for row_idx, (label, value, is_hdr) in enumerate(rows_data):
             cf(st.rows[row_idx].cells[0], label, bold=is_hdr, size=9)
@@ -476,28 +509,31 @@ def export_all_to_docx(parts: list, filepath: str):
 
         if r.get("perfect_correlations"):
             pairs = [f"{p[0]} and {p[1]}" for p in r["perfect_correlations"]]
-            note = doc.add_paragraph(
+            note  = doc.add_paragraph(
                 f"Note. Variables {', '.join(pairs)} correlated perfectly.")
-            if note.runs: note.runs[0].italic = True; note.runs[0].font.size = Pt(8)
+            if note.runs:
+                note.runs[0].italic    = True
+                note.runs[0].font.size = Pt(8)
 
         doc.add_paragraph()
 
-        fp = doc.add_paragraph()
-        _f = fp.add_run(
+        fp_para = doc.add_paragraph()
+        _f = fp_para.add_run(
             f"Part saved: {r.get('saved_at', '')}   |   "
             f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}"
         )
-        _f.font.size = Pt(7)
+        _f.font.size      = Pt(7)
         _f.font.color.rgb = RGBColor(128, 128, 128)
-        _f.italic = True
+        _f.italic         = True
 
     body_sectPr = doc.element.body.find(qn("w:sectPr"))
     if body_sectPr is not None:
         pg_mar = body_sectPr.find(qn("w:pgMar"))
         if pg_mar is None:
-            pg_mar = OxmlElement("w:pgMar"); body_sectPr.append(pg_mar)
-        for attr, val in [("w:top","864"),("w:bottom","864"),
-                           ("w:left","936"),("w:right","936")]:
+            pg_mar = OxmlElement("w:pgMar")
+            body_sectPr.append(pg_mar)
+        for attr, val in [("w:top",    "864"), ("w:bottom", "864"),
+                           ("w:left",   "936"), ("w:right",  "936")]:
             pg_mar.set(qn(attr), val)
         _apply_2col(body_sectPr)
 
@@ -524,23 +560,24 @@ def export_all_to_pdf(parts: list, filepath: str):
         topMargin=0.85 * inch, bottomMargin=0.85 * inch
     )
 
-    styles    = getSampleStyleSheet()
+    styles = getSampleStyleSheet()
 
     Title      = ParagraphStyle("Title2",     parent=styles["Normal"],
-                                 fontSize=12, alignment=TA_CENTER,
-                                 fontName="Helvetica-Bold", spaceAfter=2)
+                                fontSize=12,  alignment=TA_CENTER,
+                                fontName="Helvetica-Bold", spaceAfter=2)
     Sub        = ParagraphStyle("Sub",        parent=styles["Normal"],
-                                 fontSize=10, alignment=TA_CENTER,
-                                 fontName="Helvetica-Oblique", spaceAfter=2)
+                                fontSize=10,  alignment=TA_CENTER,
+                                fontName="Helvetica-Oblique", spaceAfter=2)
     SectionHdr = ParagraphStyle("SectionHdr", parent=styles["Normal"],
-                                 fontSize=10, fontName="Helvetica-Bold",
-                                 spaceAfter=3, spaceBefore=8)
+                                fontSize=10,  fontName="Helvetica-Bold",
+                                spaceAfter=3, spaceBefore=8)
     Body       = ParagraphStyle("Body",       parent=styles["Normal"],
-                                 fontSize=9,  spaceAfter=3)
+                                fontSize=9,   spaceAfter=3)
     Small      = ParagraphStyle("Small",      parent=styles["Normal"],
-                                 fontSize=7,  textColor=colors.grey)
+                                fontSize=7,   textColor=colors.grey)
     TableTitle = ParagraphStyle("TblTitle",   parent=styles["Normal"],
-                                 fontSize=9,  fontName="Helvetica-Oblique", spaceAfter=3)
+                                fontSize=9,   fontName="Helvetica-Oblique",
+                                spaceAfter=3)
 
     story = []
 
@@ -564,13 +601,15 @@ def export_all_to_pdf(parts: list, filepath: str):
             "Frequentist Scale Reliability Statistics", TableTitle))
 
         t1_data = [
-            ["", "",           "",          "95% CI",              ""],
-            ["Coefficient",    "Estimate",  "Std. Error",          "Lower",             "Upper"],
-            ["Coefficient α",  _fmt(r.get("alpha")),
+            ["", "", "", "95% CI", ""],
+            ["Coefficient", "Estimate", "Std. Error", "Lower", "Upper"],
+            ["Coefficient α",
+             _fmt(r.get("alpha")),
              _fmt(r.get("std_error")),
              _fmt(r.get("ci_lower")),
              _fmt(r.get("ci_upper"))],
         ]
+
         # Soft highlight color keyed to interpretation
         _alpha_bg = {
             "Excellent":    "#d1fae5",
@@ -584,41 +623,40 @@ def export_all_to_pdf(parts: list, filepath: str):
         t1 = Table(t1_data,
                    colWidths=[1.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch])
         t1.setStyle(TableStyle([
-            ("SPAN",          (3, 0), (4, 0)),
-            ("FONTNAME",      (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (0, 0), (0, -1), "LEFT"),
-            ("ALIGN",         (1, 0), (-1, -1), "CENTER"),
-            ("LINEABOVE",     (0, 0), (-1, 0), 1.2, colors.black),
-            ("LINEBELOW",     (0, 1), (-1, 1), 0.6, colors.black),
+            ("SPAN",          (3, 0),  (4, 0)),
+            ("FONTNAME",      (0, 0),  (-1, 1), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0),  (-1, -1), 8),
+            ("ALIGN",         (0, 0),  (0, -1), "LEFT"),
+            ("ALIGN",         (1, 0),  (-1, -1), "CENTER"),
+            ("LINEABOVE",     (0, 0),  (-1, 0),  1.2, colors.black),
+            ("LINEBELOW",     (0, 1),  (-1, 1),  0.6, colors.black),
             ("LINEBELOW",     (0, -1), (-1, -1), 1.2, colors.black),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            # Highlight only the Estimate cell (col 1) in the alpha row
-            ("BACKGROUND",    (1, 2), (1, 2), colors.HexColor(_alpha_bg)),
-            ("FONTNAME",      (1, 2), (1, 2), "Helvetica-Bold"),
+            ("TOPPADDING",    (0, 0),  (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0),  (-1, -1), 4),
+            ("BACKGROUND",    (1, 2),  (1, 2),   colors.HexColor(_alpha_bg)),
+            ("FONTNAME",      (1, 2),  (1, 2),   "Helvetica-Bold"),
         ]))
         story.append(t1)
         story.append(Spacer(1, 10))
 
         story.append(Paragraph("Summary Statistics", SectionHdr))
         t2_data = [
-            ["Statistic",                     "Value"],
-            ["Number of Items",               str(r.get("n_items", "—"))],
-            ["Number of Respondents",         str(r.get("n_respondents", "—"))],
-            ["Average Inter-item Corr.",      _fmt(r.get("avg_interitem_corr"))],
-            ["Reliability Interpretation",    r.get("interpretation", "—")],
+            ["Statistic",                  "Value"],
+            ["Number of Items",            str(r.get("n_items", "—"))],
+            ["Number of Respondents",      str(r.get("n_respondents", "—"))],
+            ["Average Inter-item Corr.",   _fmt(r.get("avg_interitem_corr"))],
+            ["Reliability Interpretation", r.get("interpretation", "—")],
         ]
         t2 = Table(t2_data, colWidths=[2.5*inch, 2.0*inch])
         t2.setStyle(TableStyle([
-            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (1, 0), (-1, -1), "CENTER"),
-            ("LINEABOVE",     (0, 0), (-1, 0), 1.2, colors.black),
-            ("LINEBELOW",     (0, 0), (-1, 0), 0.6, colors.black),
+            ("FONTNAME",      (0, 0),  (-1, 0),  "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0),  (-1, -1), 8),
+            ("ALIGN",         (1, 0),  (-1, -1), "CENTER"),
+            ("LINEABOVE",     (0, 0),  (-1, 0),  1.2, colors.black),
+            ("LINEBELOW",     (0, 0),  (-1, 0),  0.6, colors.black),
             ("LINEBELOW",     (0, -1), (-1, -1), 1.2, colors.black),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING",    (0, 0),  (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0),  (-1, -1), 4),
         ]))
         story.append(t2)
         story.append(Spacer(1, 10))
@@ -631,9 +669,9 @@ def export_all_to_pdf(parts: list, filepath: str):
             story.append(Spacer(1, 6))
 
         if r.get("perfect_correlations"):
-            pairs = [f"{p[0]} and {p[1]}" for p in r["perfect_correlations"]]
+            pairs      = [f"{p[0]} and {p[1]}" for p in r["perfect_correlations"]]
             note_style = ParagraphStyle("note", parent=styles["Normal"],
-                                         fontSize=8, fontName="Helvetica-Oblique")
+                                        fontSize=8, fontName="Helvetica-Oblique")
             story.append(Paragraph(
                 f"Note. Variables {', '.join(pairs)} correlated perfectly.",
                 note_style))
@@ -648,30 +686,30 @@ def export_all_to_pdf(parts: list, filepath: str):
 
         story.append(Paragraph("Interpretation Guide", SectionHdr))
         guide_data = [
-            ["Range",               "Interpretation"],
-            ["α ≥ 0.90",            "Excellent internal consistency"],
-            ["0.80 ≤ α < 0.90",     "Good internal consistency"],
-            ["0.70 ≤ α < 0.80",     "Acceptable internal consistency"],
-            ["0.60 ≤ α < 0.70",     "Questionable internal consistency"],
-            ["0.50 ≤ α < 0.60",     "Poor internal consistency"],
-            ["α < 0.50",            "Unacceptable internal consistency"],
+            ["Range",            "Interpretation"],
+            ["α ≥ 0.90",         "Excellent internal consistency"],
+            ["0.80 ≤ α < 0.90",  "Good internal consistency"],
+            ["0.70 ≤ α < 0.80",  "Acceptable internal consistency"],
+            ["0.60 ≤ α < 0.70",  "Questionable internal consistency"],
+            ["0.50 ≤ α < 0.60",  "Poor internal consistency"],
+            ["α < 0.50",         "Unacceptable internal consistency"],
         ]
-        tg = Table(guide_data, colWidths=[1.8*inch, 3.0*inch])
         tg_style = [
-            ("FONTNAME",      (0, 0), (-1, 0),  "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (0, 0), (-1, -1), "LEFT"),
-            ("LINEABOVE",     (0, 0), (-1, 0),  1.2, colors.black),
-            ("LINEBELOW",     (0, 0), (-1, 0),  0.6, colors.black),
+            ("FONTNAME",      (0, 0),  (-1, 0),  "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0),  (-1, -1), 8),
+            ("ALIGN",         (0, 0),  (-1, -1), "LEFT"),
+            ("LINEABOVE",     (0, 0),  (-1, 0),  1.2, colors.black),
+            ("LINEBELOW",     (0, 0),  (-1, 0),  0.6, colors.black),
             ("LINEBELOW",     (0, -1), (-1, -1), 1.2, colors.black),
-            ("TOPPADDING",    (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING",    (0, 0),  (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0),  (-1, -1), 3),
         ]
         if highlight_row:
             tg_style.append(
                 ("BACKGROUND", (0, highlight_row), (-1, highlight_row),
                  colors.HexColor(_alpha_bg))
             )
+        tg = Table(guide_data, colWidths=[1.8*inch, 3.0*inch])
         tg.setStyle(TableStyle(tg_style))
         story.append(tg)
         story.append(Spacer(1, 10))

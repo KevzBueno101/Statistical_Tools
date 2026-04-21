@@ -1,8 +1,6 @@
 """
-cronbach_session_manager.py  —  Multi-Part Session Manager for Cronbach's Alpha
-Adapted from the ANOVA session_manager.py.
-
-Handles saving / loading / exporting of multiple reliability parts
+session_manager.py  —  Multi-Part Session Manager for One-Way ANOVA
+Handles saving / loading / exporting of multiple ANOVA parts
 (Part 1-A, 1-B, 2-A …) with DOCX and PDF batch export.
 """
 
@@ -11,7 +9,6 @@ import numpy as np
 import customtkinter as ctk
 from tkinter import messagebox
 from datetime import datetime
-import os
 
 # ── Palette (matches main app) ────────────────────────────────────────────────
 BG_DEEP   = "#0d1117"
@@ -36,7 +33,7 @@ FONT_MONO = ("Consolas", 9)
 FONT_TINY = ("Segoe UI", 9)
 
 
-# ── Label generator (same logic as ANOVA) ─────────────────────────────────────
+# ── Label generator ───────────────────────────────────────────────────────────
 
 def _next_part_label(existing_labels: list) -> str:
     """Generate next Part label: Part 1-A, Part 1-B … Part 1-Z, Part 2-A …"""
@@ -55,25 +52,21 @@ def _next_part_label(existing_labels: list) -> str:
     return f"Part {max_num}-{next_letter}"
 
 
-def _fmt(v, d=4):
-    return f"{float(v):.{d}f}" if v is not None else "N/A"
+def _fmt(v, d=2):
+    try:
+        return f"{float(v):.{d}f}"
+    except (TypeError, ValueError):
+        return "N/A"
 
 
-def _interp_color(interp: str) -> str:
-    return {
-        "Excellent":    ACCENT,
-        "Good":         SUCCESS,
-        "Acceptable":   ACCENT2,
-        "Questionable": WARN,
-        "Poor":         "#f97316",
-        "Unacceptable": DANGER,
-    }.get(interp, TEXT_SEC)
+def _sig_color(is_significant: bool) -> str:
+    return SUCCESS if is_significant else DANGER
 
 
 # ── Part Card ─────────────────────────────────────────────────────────────────
 
 class PartCard(ctk.CTkFrame):
-    """One row in the session panel — mirrors ANOVA PartCard."""
+    """One row in the session panel."""
 
     def __init__(self, master, part_data: dict, index: int,
                  on_delete, on_view, **kw):
@@ -93,12 +86,13 @@ class PartCard(ctk.CTkFrame):
                      fg_color=badge_color, text_color="#0d1117",
                      corner_radius=5, padx=8, pady=2).pack(side="left")
 
-        # Interpretation badge (replaces Sig/Not-Sig)
-        interp = self.part_data.get("interpretation", "—")
-        ic = _interp_color(interp)
-        ctk.CTkLabel(top, text=interp,
+        # Significant / Not Significant badge
+        is_sig = self.part_data.get("is_significant", False)
+        sig_text  = "✓ Significant" if is_sig else "✗ Not Significant"
+        sig_color = SUCCESS if is_sig else DANGER
+        ctk.CTkLabel(top, text=sig_text,
                      font=FONT_TINY,
-                     fg_color=ic, text_color="#fff" if interp != "Excellent" else "#0d1117",
+                     fg_color=sig_color, text_color="#fff",
                      corner_radius=4, padx=6, pady=2).pack(side="left", padx=6)
 
         # Delete button
@@ -119,10 +113,13 @@ class PartCard(ctk.CTkFrame):
 
         # Key stats row
         r = self.part_data
-        stats = (f"α = {_fmt(r.get('alpha'))}   "
-                 f"k = {r.get('n_items', '?')} items   "
-                 f"N = {r.get('n_respondents', '?')} respondents   "
-                 f"r̄ = {_fmt(r.get('avg_interitem_corr'))}")
+        df_b = r.get("df_between", "?")
+        df_w = r.get("df_within",  "?")
+        F    = _fmt(r.get("F_statistic"))
+        p    = _fmt(r.get("p_value"))
+        k    = len(r.get("groups", []))
+        stats = (f"F({df_b}, {df_w}) = {F}   p = {p}   "
+                 f"k = {k} groups   {r.get('decision', '')}")
         ctk.CTkLabel(self, text=stats, font=FONT_TINY,
                      text_color=TEXT_SEC).pack(anchor="w", padx=10, pady=(0, 4))
 
@@ -136,17 +133,14 @@ class PartCard(ctk.CTkFrame):
 # ── Session Manager Panel ─────────────────────────────────────────────────────
 
 class SessionManagerPanel(ctk.CTkToplevel):
-    """
-    Floating panel listing all saved Cronbach's Alpha parts.
-    Mirrors the ANOVA SessionManagerPanel interface exactly.
-    """
+    """Floating panel listing all saved ANOVA parts."""
 
     def __init__(self, master, saved_parts: list,
                  on_delete_part, on_export_all_docx, on_export_all_pdf):
         super().__init__(master)
-        self.title("📁  Session Manager — Saved Parts")
-        self.geometry("480x660")
-        self.minsize(400, 480)
+        self.title("📁  Session Manager — Saved ANOVA Parts")
+        self.geometry("520x660")
+        self.minsize(420, 480)
         self.configure(fg_color=BG_DEEP)
         self.resizable(True, True)
 
@@ -165,7 +159,7 @@ class SessionManagerPanel(ctk.CTkToplevel):
         # Header
         hdr = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=0, height=52)
         hdr.pack(fill="x"); hdr.pack_propagate(False)
-        ctk.CTkLabel(hdr, text="📁  Session Manager",
+        ctk.CTkLabel(hdr, text="📁  Session Manager — ANOVA Parts",
                      font=FONT_HEAD, text_color=TEXT_PRI).pack(side="left", padx=16)
         self.count_label = ctk.CTkLabel(hdr,
                      text=f"{len(self.saved_parts)} part(s) saved",
@@ -192,6 +186,11 @@ class SessionManagerPanel(ctk.CTkToplevel):
                       font=FONT_BTN, height=36, corner_radius=8,
                       command=self.on_export_pdf).pack(side="left", padx=6, pady=16)
 
+        ctk.CTkButton(btn_frame, text="🗑  Clear All",
+                      fg_color="#7f1d1d", hover_color="#450a0a",
+                      font=FONT_BTN, height=36, corner_radius=8,
+                      command=self._clear_all).pack(side="left", padx=6, pady=16)
+
         ctk.CTkButton(btn_frame, text="✕ Close",
                       fg_color=BG_PANEL, hover_color=BORDER,
                       font=FONT_BTN, height=36, corner_radius=8,
@@ -202,7 +201,7 @@ class SessionManagerPanel(ctk.CTkToplevel):
             w.destroy()
         if not self.saved_parts:
             ctk.CTkLabel(self.scroll,
-                         text="No parts saved yet.\nCompute α and click  '💾 Save Part'.",
+                         text="No parts saved yet.\nCompute ANOVA and click  '🗂 Save Part'.",
                          font=FONT_BODY, text_color=TEXT_SEC,
                          justify="center").pack(expand=True, pady=40)
             return
@@ -215,8 +214,20 @@ class SessionManagerPanel(ctk.CTkToplevel):
     def _handle_delete(self, label: str):
         if messagebox.askyesno("Delete Part",
                                 f"Remove '{label}' from this session?"):
-            self.on_delete_part(label)   # mutates the shared list in-place
-            self.refresh()               # re-reads the same list object
+            self.on_delete_part(label)
+            self.refresh()
+
+    def _clear_all(self):
+        if not self.saved_parts:
+            messagebox.showinfo("Nothing to Clear", "There are no saved parts to clear.")
+            return
+        n = len(self.saved_parts)
+        if messagebox.askyesno(
+                "Clear All Parts",
+                f"This will permanently remove all {n} saved part(s).\n\nAre you sure?"):
+            for part in list(self.saved_parts):
+                self.on_delete_part(part["label"])
+            self.refresh()
 
     def _handle_view(self, part_data: dict):
         ViewPartWindow(self, part_data)
@@ -262,45 +273,50 @@ def _build_part_summary(r: dict) -> str:
     if r.get("researcher_name"): out += f"by: {r['researcher_name']}\n"
     out += f"{line}\n\n"
 
-    out += "RELIABILITY COEFFICIENT\n" + "─" * 28 + "\n"
-    out += f"  Cronbach's Alpha (α): {_fmt(r.get('alpha'))}\n"
-    out += f"  Interpretation:       {r.get('interpretation', '—')}\n\n"
-    out += f"  Std. Error:           {_fmt(r.get('std_error'))}\n"
-    out += f"  95% CI Lower:         {_fmt(r.get('ci_lower'))}\n"
-    out += f"  95% CI Upper:         {_fmt(r.get('ci_upper'))}\n\n"
+    out += "DESCRIPTIVE STATISTICS\n" + "─" * 30 + "\n"
+    for name, g in zip(r.get("group_names", []), r.get("groups", [])):
+        out += (f"  {name}:  n={len(g)}  "
+                f"M={_fmt(np.mean(g))}  "
+                f"SD={_fmt(np.std(g, ddof=1))}\n")
 
-    out += "DESCRIPTIVE STATISTICS\n" + "─" * 28 + "\n"
-    out += f"  Number of Items:       {r.get('n_items', '—')}\n"
-    out += f"  Number of Respondents: {r.get('n_respondents', '—')}\n"
-    out += f"  Avg Inter-item r:      {_fmt(r.get('avg_interitem_corr'))}\n\n"
+    out += f"\n{'Source':<16}{'SS':>10}{'df':>6}{'MS':>12}{'F':>10}\n"
+    out += "─" * 55 + "\n"
+    out += (f"{'Between':<16}{_fmt(r.get('SS_between')):>10}"
+            f"{str(r.get('df_between', '')):>6}"
+            f"{_fmt(r.get('MS_between')):>12}"
+            f"{_fmt(r.get('F_statistic')):>10}\n")
+    out += (f"{'Within':<16}{_fmt(r.get('SS_within')):>10}"
+            f"{str(r.get('df_within', '')):>6}"
+            f"{_fmt(r.get('MS_within')):>12}\n")
+    df_total = (r.get("df_between", 0) or 0) + (r.get("df_within", 0) or 0)
+    out += (f"{'Total':<16}{_fmt(r.get('SS_total')):>10}"
+            f"{str(df_total):>6}\n")
 
-    items = r.get("item_names", [])
-    if items:
-        out += f"ITEMS ({len(items)}):\n" + "─" * 28 + "\n"
-        out += "\n".join(f"  {i+1}. {nm}" for i, nm in enumerate(items))
-        out += "\n\n"
+    out += f"\n{'═'*52}\nTEST RESULTS\n{'═'*52}\n"
+    out += (f"F({r.get('df_between')}, {r.get('df_within')}) = "
+            f"{_fmt(r.get('F_statistic'))},  "
+            f"p = {_fmt(r.get('p_value'))},  "
+            f"α = {r.get('alpha', 0.05)}\n\n")
+    out += f"Decision:   {r.get('decision', '')}\n\n"
+    out += f"Conclusion:\n{r.get('conclusion', '')}\n\n"
 
-    if r.get("description"):
-        out += f"DESCRIPTION:\n{r['description']}\n\n"
+    if r.get("is_significant") and r.get("tukey"):
+        out += f"\n{'─'*52}\nPOST HOC — Tukey HSD\n{'─'*52}\n"
+        out += str(r["tukey"]) + "\n"
 
-    out += f"Saved: {r.get('saved_at', '—')}\n"
+    out += f"\nSaved: {r.get('saved_at', '—')}\n"
     return out
 
 
 # ── DOCX Export (all parts) ───────────────────────────────────────────────────
 
 def export_all_to_docx(parts: list, filepath: str):
-    """
-    Write all saved Cronbach's Alpha parts into a single APA-style DOCX.
-    Two-column layout, same margins as the ANOVA exporter.
-    """
+    """Write all saved ANOVA parts into a single APA-style DOCX."""
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _set_section_margins(sect):
         sect.top_margin    = Inches(0.60)
@@ -321,25 +337,19 @@ def export_all_to_docx(parts: list, filepath: str):
         p_el = OxmlElement("w:p")
         pPr  = OxmlElement("w:pPr")
         sPr  = OxmlElement("w:sectPr")
-
         pg_mar = OxmlElement("w:pgMar")
         for attr, val in [("w:top","864"),("w:bottom","864"),
                            ("w:left","936"),("w:right","936"),
                            ("w:header","720"),("w:footer","720"),("w:gutter","0")]:
             pg_mar.set(qn(attr), val)
         sPr.append(pg_mar)
-
         cols_el = OxmlElement("w:cols")
-        cols_el.set(qn("w:num"),   "2")
-        cols_el.set(qn("w:space"), "720")
+        cols_el.set(qn("w:num"), "2"); cols_el.set(qn("w:space"), "720")
         sPr.append(cols_el)
-
         pg_type = OxmlElement("w:type")
         pg_type.set(qn("w:val"), break_type)
         sPr.append(pg_type)
-
-        pPr.append(sPr)
-        p_el.append(pPr)
+        pPr.append(sPr); p_el.append(pPr)
         doc.element.body.append(p_el)
 
     def apa_borders(table):
@@ -368,8 +378,6 @@ def export_all_to_docx(parts: list, filepath: str):
         run.font.size = Pt(size); run.bold = bold; run.italic = italic
         if color: run.font.color.rgb = RGBColor(*color)
 
-    # ── Build document ────────────────────────────────────────────────────────
-
     doc = Document()
     _set_section_margins(doc.sections[0])
     _apply_2col(doc.sections[0]._sectPr)
@@ -386,7 +394,7 @@ def export_all_to_docx(parts: list, filepath: str):
             run.font.color.rgb = RGBColor(0, 0, 0)
 
         # Title / subtitle / author
-        tp = doc.add_paragraph(r.get("report_title", "Unidimensional Reliability"))
+        tp = doc.add_paragraph(r.get("report_title", "ANOVA ANALYSIS RESULTS"))
         tp.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         for run in tp.runs: run.bold = True; run.font.size = Pt(14)
 
@@ -402,75 +410,114 @@ def export_all_to_docx(parts: list, filepath: str):
 
         doc.add_paragraph()
 
-        # Description
-        if r.get("description"):
-            dp = doc.add_paragraph(r["description"])
-            for run in dp.runs: run.font.size = Pt(9)
+        # ── Table 1: Descriptive Statistics ──────────────────────────────────
+        p = doc.add_paragraph(); p.add_run("Table 1\n").bold = True
+        p.runs[0].font.size = Pt(10)
+        tp2 = doc.add_paragraph(r.get("desc_table_title", "Descriptive Statistics for Groups"))
+        if tp2.runs: tp2.runs[0].italic = True; tp2.runs[0].font.size = Pt(9)
+
+        groups      = r.get("groups", [])
+        group_names = r.get("group_names", [])
+
+        dt = doc.add_table(rows=len(groups) + 1, cols=4)
+        apa_borders(dt)
+        for i, h in enumerate(["Group", "n", "M", "SD"]):
+            cf(dt.rows[0].cells[i], h, bold=True, size=9, align="center")
+        add_header_sep(dt)
+        for i, (name, g) in enumerate(zip(group_names, groups), 1):
+            cf(dt.rows[i].cells[0], name, size=9)
+            cf(dt.rows[i].cells[1], str(len(g)),             size=9, align="center")
+            cf(dt.rows[i].cells[2], _fmt(np.mean(g)),        size=9, align="center")
+            cf(dt.rows[i].cells[3], _fmt(np.std(g, ddof=1)), size=9, align="center")
+
+        doc.add_paragraph()
+
+        # ── Table 2: ANOVA Summary ────────────────────────────────────────────
+        tp3 = doc.add_paragraph(
+            r.get("anova_table_title", "Analysis of Variance Summary Table"))
+        if tp3.runs: tp3.runs[0].italic = True; tp3.runs[0].font.size = Pt(9)
+
+        at = doc.add_table(rows=4, cols=6)
+        apa_borders(at)
+        for i, h in enumerate(["Source", "SS", "df", "MS", "F", "p"]):
+            cf(at.rows[0].cells[i], h, bold=True, size=9, align="center")
+        add_header_sep(at)
+
+        row1 = at.rows[1]
+        cf(row1.cells[0], r.get("anova_between_label", "Between Groups"), size=9)
+        for col, val in enumerate([_fmt(r.get("SS_between")), str(r.get("df_between", "")),
+                                    _fmt(r.get("MS_between")), _fmt(r.get("F_statistic")),
+                                    _fmt(r.get("p_value"))], 1):
+            cf(row1.cells[col], val, size=9, align="center")
+
+        row2 = at.rows[2]
+        cf(row2.cells[0], r.get("anova_within_label", "Within Groups"), size=9)
+        for col, val in enumerate([_fmt(r.get("SS_within")), str(r.get("df_within", "")),
+                                    _fmt(r.get("MS_within"))], 1):
+            cf(row2.cells[col], val, size=9, align="center")
+
+        row3 = at.rows[3]
+        cf(row3.cells[0], r.get("anova_total_label", "Total"), size=9)
+        df_total = (r.get("df_between", 0) or 0) + (r.get("df_within", 0) or 0)
+        for col, val in enumerate([_fmt(r.get("SS_total")), str(df_total)], 1):
+            cf(row3.cells[col], val, size=9, align="center")
+
+        doc.add_paragraph()
+
+        # ── Test Results ──────────────────────────────────────────────────────
+        rh = doc.add_paragraph(); rh.add_run("Test Results\n").bold = True
+        rh.runs[0].font.size = Pt(10)
+
+        if r.get("edited") and r.get("conclusion_text"):
+            cp = doc.add_paragraph(r["conclusion_text"])
+            for run in cp.runs: run.font.size = Pt(9)
+        else:
+            cp = doc.add_paragraph()
+            cp.add_run(f"F({r.get('df_between')}, {r.get('df_within')}) = ")
+            fr = cp.add_run(_fmt(r.get("F_statistic"))); fr.bold = True
+            cp.add_run(", p = ")
+            pr_ = cp.add_run(_fmt(r.get("p_value"))); pr_.bold = True
+            cp.add_run("\n\nDecision: ")
+            dr = cp.add_run(r.get("decision", "")); dr.bold = True
+            cp.add_run(f"\n\n{r.get('conclusion', '')}")
+            for run in cp.runs: run.font.size = Pt(9)
+
+        # ── Post Hoc (Tukey) ──────────────────────────────────────────────────
+        if r.get("is_significant") and r.get("tukey"):
             doc.add_paragraph()
-
-        # ── Table: Frequentist Scale Reliability Statistics ───────────────────
-        ti = doc.add_paragraph("Frequentist Scale Reliability Statistics")
-        if ti.runs: ti.runs[0].italic = True; ti.runs[0].font.size = Pt(9)
-
-        # 5 columns: Coefficient | Estimate | Std. Error | CI Lower | CI Upper
-        tbl = doc.add_table(rows=3, cols=5)
-        apa_borders(tbl)
-
-        # Row 0: merged CI header
-        headers_row0 = ["", "", "", "95% CI", ""]
-        for i, h in enumerate(headers_row0):
-            cf(tbl.rows[0].cells[i], h, bold=True, size=8, align="center")
-        # Merge CI cells (cols 3 & 4)
-        tbl.rows[0].cells[3].merge(tbl.rows[0].cells[4])
-
-        # Row 1: column labels
-        for i, h in enumerate(["Coefficient", "Estimate", "Std. Error", "Lower", "Upper"]):
-            cf(tbl.rows[1].cells[i], h, bold=True, size=8, align="center")
-        add_header_sep(tbl)
-
-        # Row 2: data
-        cf(tbl.rows[2].cells[0], "Coefficient α",   size=9)
-        cf(tbl.rows[2].cells[1], _fmt(r.get("alpha")),        size=9, align="center")
-        cf(tbl.rows[2].cells[2], _fmt(r.get("std_error")),    size=9, align="center")
-        cf(tbl.rows[2].cells[3], _fmt(r.get("ci_lower")),     size=9, align="center")
-        cf(tbl.rows[2].cells[4], _fmt(r.get("ci_upper")),     size=9, align="center")
+            php = doc.add_paragraph(r.get("posthoc_title", "Post Hoc Comparisons (Tukey HSD)"))
+            if php.runs: php.runs[0].italic = True; php.runs[0].font.size = Pt(9)
+            phtext = r.get("posthoc_text", str(r["tukey"]))
+            pph = doc.add_paragraph(phtext)
+            for run in pph.runs: run.font.name = "Courier New"; run.font.size = Pt(7)
 
         doc.add_paragraph()
 
-        # ── Summary statistics table ──────────────────────────────────────────
-        st_title = doc.add_paragraph("Summary Statistics")
-        if st_title.runs: st_title.runs[0].italic = True; st_title.runs[0].font.size = Pt(9)
+        # ── Raw Data Table ────────────────────────────────────────────────────
+        rdt_title = doc.add_paragraph(r.get("rawdata_table_title", "Raw Data by Group"))
+        if rdt_title.runs: rdt_title.runs[0].italic = True; rdt_title.runs[0].font.size = Pt(9)
 
-        st = doc.add_table(rows=5, cols=2)
-        apa_borders(st)
-        rows_data = [
-            ("Statistic",                    "Value",                         True),
-            ("Number of Items",              str(r.get("n_items", "—")),       False),
-            ("Number of Respondents",        str(r.get("n_respondents", "—")), False),
-            ("Average Inter-item Corr.",     _fmt(r.get("avg_interitem_corr")),False),
-            ("Reliability Interpretation",   r.get("interpretation", "—"),     False),
-        ]
-        for row_idx, (label, value, is_hdr) in enumerate(rows_data):
-            cf(st.rows[row_idx].cells[0], label, bold=is_hdr, size=9)
-            cf(st.rows[row_idx].cells[1], value, bold=is_hdr, size=9, align="center")
-        add_header_sep(st)
+        rdt = doc.add_table(rows=len(groups) + 1, cols=3)
+        apa_borders(rdt)
+        for i, h in enumerate(["Group", "n", "Values"]):
+            cf(rdt.rows[0].cells[i], h, bold=True, size=8, align="center")
+        add_header_sep(rdt)
 
-        doc.add_paragraph()
-
-        # ── Items list ───────────────────────────────────────────────────────
-        items = r.get("item_names", [])
-        if items:
-            ip = doc.add_paragraph()
-            ip.add_run(f"Items ({len(items)}): ").bold = True
-            ip.runs[0].font.size = Pt(9)
-            ip.add_run(", ".join(items)).font.size = Pt(9)
-
-        # ── Perfect correlations note ─────────────────────────────────────────
-        if r.get("perfect_correlations"):
-            pairs = [f"{p[0]} and {p[1]}" for p in r["perfect_correlations"]]
-            note = doc.add_paragraph(
-                f"Note. Variables {', '.join(pairs)} correlated perfectly.")
-            if note.runs: note.runs[0].italic = True; note.runs[0].font.size = Pt(8)
+        if r.get("raw_data_edits"):
+            for i, edit in enumerate(r["raw_data_edits"], 1):
+                cf(rdt.rows[i].cells[0], edit["group_name"], size=7)
+                n_c = len(edit["values_text"].split(","))
+                cf(rdt.rows[i].cells[1], str(n_c), size=7, align="center")
+                vt = edit["values_text"]
+                if len(vt) > 60: vt = vt[:57] + "…"
+                cf(rdt.rows[i].cells[2], vt, size=7)
+        else:
+            for i, (name, g) in enumerate(zip(group_names, groups), 1):
+                cf(rdt.rows[i].cells[0], name, size=7)
+                cf(rdt.rows[i].cells[1], str(len(g)), size=7, align="center")
+                vs = ", ".join(_fmt(v) for v in g)
+                if len(vs) > 60: vs = vs[:57] + "…"
+                cf(rdt.rows[i].cells[2], vs, size=7)
 
         doc.add_paragraph()
 
@@ -502,154 +549,265 @@ def export_all_to_docx(parts: list, filepath: str):
 
 def export_all_to_pdf(parts: list, filepath: str):
     """
-    Write all saved Cronbach's Alpha parts into a single APA-style PDF.
-    Mirrors the ANOVA PDF exporter layout.
+    Write all saved ANOVA parts into a single APA-style PDF.
+    Single-column layout — maximised, readable font sizes, one page per part.
+
+    Font size summary vs old two-column version:
+        Part label   13 pt  (was 8.5 pt)
+        Title        12 pt  (was 7.5 pt)
+        Subtitle     10 pt  (was 6.5 pt)
+        Section hdr   9.5 pt  (was 6.5 pt)
+        Body / result 9 pt  (was 6 pt)
+        Table cells   8.5 pt  (was 5.5 pt)
+        Mono / Tukey  7.5 pt  (was 4.8 pt)
+        Footer        7.5 pt  (was 5 pt)
     """
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
-    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                     Table, TableStyle, PageBreak, HRFlowable)
+    from reportlab.platypus import (
+        BaseDocTemplate, PageTemplate, Frame,
+        Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, NextPageTemplate, PageBreak,
+    )
     from reportlab.lib.units import inch
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
-    doc_pdf = SimpleDocTemplate(
-        filepath, pagesize=letter,
-        leftMargin=inch, rightMargin=inch,
-        topMargin=0.85 * inch, bottomMargin=0.85 * inch
+    # ── Page geometry ─────────────────────────────────────────────────────────
+    PAGE_W, PAGE_H = letter          # 612 × 792 pt
+    ML = MR = 0.55 * inch
+    MT = MB = 0.45 * inch
+    COL_W = PAGE_W - ML - MR        # full usable width ≈ 7.17 inch
+    COL_H = PAGE_H - MT - MB        # usable height   ≈ 7.02 inch
+
+    # ── Colours ───────────────────────────────────────────────────────────────
+    ACCENT_CL = colors.HexColor("#00796b")
+    GREY_TEXT = colors.HexColor("#555555")
+    BLACK     = colors.black
+
+    styles = getSampleStyleSheet()
+
+    # ── Paragraph styles ──────────────────────────────────────────────────────
+    def PS(name, **kw):
+        return ParagraphStyle(name, parent=styles["Normal"], **kw)
+
+    PartLbl = PS("PartLbl",
+                 fontSize=13, fontName="Helvetica-Bold",
+                 spaceAfter=2, spaceBefore=0,
+                 textColor=colors.HexColor("#003366"))
+
+    TitleSt = PS("TitleSt",
+                 fontSize=12, fontName="Helvetica-Bold",
+                 alignment=TA_CENTER, spaceAfter=2, spaceBefore=1)
+
+    SubSt   = PS("SubSt",
+                 fontSize=10, fontName="Helvetica-Oblique",
+                 alignment=TA_CENTER, spaceAfter=1)
+
+    SecHdr  = PS("SecHdr",
+                 fontSize=9.5, fontName="Helvetica-Bold",
+                 spaceAfter=2, spaceBefore=5,
+                 textColor=colors.HexColor("#1a1a2e"))
+
+    BodySt  = PS("BodySt",
+                 fontSize=9, spaceAfter=2, leading=12)
+
+    ResultSt = PS("ResultSt",
+                  fontSize=11, spaceAfter=3, leading=15)
+
+    SmallSt = PS("SmallSt",
+                 fontSize=7.5, textColor=GREY_TEXT,
+                 spaceAfter=0, leading=9)
+
+    MonoSt  = PS("MonoSt",
+                 fontSize=7.5, fontName="Courier",
+                 spaceAfter=0, leading=9.5)
+
+    # ── Shared APA table style (no colour — clean black & white) ─────────────
+    def tbl_style(extra=None):
+        base = [
+            ("FONTNAME",      (0, 0), (-1,  0),  "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1),   8.5),
+            ("LEADING",       (0, 0), (-1, -1),   11),
+            ("ALIGN",         (1, 0), (-1, -1),   "CENTER"),
+            ("ALIGN",         (0, 0), (0,  -1),   "LEFT"),
+            ("LINEABOVE",     (0, 0), (-1,  0),   1.2, BLACK),
+            ("LINEBELOW",     (0, 0), (-1,  0),   0.6, BLACK),
+            ("LINEBELOW",     (0,-1), (-1, -1),   1.2, BLACK),
+            ("TOPPADDING",    (0, 0), (-1, -1),   2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1),   2.5),
+            ("LEFTPADDING",   (0, 0), (-1, -1),   4),
+            ("RIGHTPADDING",  (0, 0), (-1, -1),   4),
+        ]
+        if extra:
+            base.extend(extra)
+        return TableStyle(base)
+
+    # ── One PageTemplate per part ─────────────────────────────────────────────
+    doc = BaseDocTemplate(
+        filepath,
+        pagesize=letter,
+        leftMargin=ML, rightMargin=MR,
+        topMargin=MT,  bottomMargin=MB,
     )
 
-    styles    = getSampleStyleSheet()
-    TH_COLOR  = colors.HexColor("#e8f4f8")
-    BORDER_CL = colors.HexColor("#cccccc")
+    templates = []
+    for i in range(len(parts)):
+        frame = Frame(
+            ML, MB, COL_W, COL_H,
+            leftPadding=0, rightPadding=0,
+            topPadding=0,  bottomPadding=0,
+            id=f"p{i}_main",
+        )
+        templates.append(PageTemplate(id=f"part{i}", frames=[frame]))
+    doc.addPageTemplates(templates)
 
-    PartLabel  = ParagraphStyle("PartLabel",  parent=styles["Heading1"],
-                                 fontSize=13, spaceAfter=4,
-                                 textColor=colors.HexColor("#0d1117"))
-    Title      = ParagraphStyle("Title2",     parent=styles["Normal"],
-                                 fontSize=12, alignment=TA_CENTER,
-                                 fontName="Helvetica-Bold", spaceAfter=2)
-    Sub        = ParagraphStyle("Sub",        parent=styles["Normal"],
-                                 fontSize=10, alignment=TA_CENTER,
-                                 fontName="Helvetica-Oblique", spaceAfter=2)
-    SectionHdr = ParagraphStyle("SectionHdr", parent=styles["Normal"],
-                                 fontSize=10, fontName="Helvetica-Bold",
-                                 spaceAfter=3, spaceBefore=8)
-    Body       = ParagraphStyle("Body",       parent=styles["Normal"],
-                                 fontSize=9,  spaceAfter=3)
-    Small      = ParagraphStyle("Small",      parent=styles["Normal"],
-                                 fontSize=7,  textColor=colors.grey)
-    TableTitle = ParagraphStyle("TblTitle",   parent=styles["Normal"],
-                                 fontSize=9,  fontName="Helvetica-Oblique", spaceAfter=3)
-
+    # ── Story ─────────────────────────────────────────────────────────────────
     story = []
 
     for part_idx, r in enumerate(parts):
+        groups      = r.get("groups",      [])
+        group_names = r.get("group_names", [])
+        df_total    = (r.get("df_between", 0) or 0) + (r.get("df_within", 0) or 0)
+
+        story.append(NextPageTemplate(f"part{part_idx}"))
         if part_idx > 0:
             story.append(PageBreak())
 
-        # Part label + rule
-        story.append(Paragraph(r.get("label", f"Part {part_idx + 1}"), PartLabel))
-        story.append(HRFlowable(width="100%", thickness=1,
-                                 color=colors.HexColor("#00c9a7"), spaceAfter=6))
+        # ── Part label + accent rule ──────────────────────────────────────────
+        story.append(Paragraph(r.get("label", f"Part {part_idx + 1}"), PartLbl))
+        story.append(HRFlowable(width=COL_W, thickness=1.5,
+                                 color=ACCENT_CL, spaceAfter=3))
 
-        # Title block
+        # ── Title / subtitle / author ─────────────────────────────────────────
         story.append(Paragraph(
-            r.get("report_title", "Unidimensional Reliability"), Title))
+            r.get("report_title", "ANOVA ANALYSIS RESULTS"), TitleSt))
         if r.get("report_subtitle"):
-            story.append(Paragraph(r["report_subtitle"], Sub))
+            story.append(Paragraph(r["report_subtitle"], SubSt))
         if r.get("researcher_name"):
-            story.append(Paragraph(r["researcher_name"], Sub))
-        story.append(Spacer(1, 8))
+            story.append(Paragraph(r["researcher_name"], SubSt))
+        story.append(Spacer(1, 4))
 
-        # Description
-        if r.get("description"):
-            story.append(Paragraph(r["description"], Body))
-            story.append(Spacer(1, 6))
-
-        # ── Table: Frequentist Scale Reliability Statistics ───────────────────
-        story.append(Paragraph(
-            "Frequentist Scale Reliability Statistics", TableTitle))
-
-        t1_data = [
-            ["", "",           "",          "95% CI",     ""],
-            ["Coefficient",    "Estimate",  "Std. Error", "Lower",             "Upper"],
-            ["Coefficient α",  _fmt(r.get("alpha")),
-             _fmt(r.get("std_error")),
-             _fmt(r.get("ci_lower")),
-             _fmt(r.get("ci_upper"))],
-        ]
-        t1 = Table(t1_data,
-                   colWidths=[1.6*inch, 0.9*inch, 0.9*inch, 0.8*inch, 0.8*inch])
-        t1.setStyle(TableStyle([
-            # CI span header
-            ("SPAN",       (3, 0), (4, 0)),
-            ("FONTNAME",   (0, 0), (-1, 1), "Helvetica-Bold"),
-            ("FONTSIZE",   (0, 0), (-1, -1), 8),
-            ("ALIGN",      (0, 0), (0, -1), "LEFT"),
-            ("ALIGN",      (1, 0), (-1, -1), "CENTER"),
-            ("BACKGROUND", (0, 1), (-1, 1), TH_COLOR),
-            ("LINEABOVE",  (0, 0), (-1, 0), 1.2, colors.black),
-            ("LINEBELOW",  (0, 1), (-1, 1), 0.6, BORDER_CL),
-            ("LINEBELOW",  (0, -1), (-1, -1), 1.2, colors.black),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ]))
+        # ── Table 1 — Descriptive Statistics ─────────────────────────────────
+        story.append(Paragraph("Table 1. Descriptive Statistics for Groups", SecHdr))
+        t1_data = [["Group", "n", "M", "SD"]]
+        for name, g in zip(group_names, groups):
+            t1_data.append([
+                name,
+                str(len(g)),
+                _fmt(np.mean(g)),
+                _fmt(np.std(g, ddof=1)),
+            ])
+        cw1 = [COL_W * 0.46, COL_W * 0.14, COL_W * 0.20, COL_W * 0.20]
+        t1  = Table(t1_data, colWidths=cw1)
+        t1.setStyle(tbl_style())
         story.append(t1)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 5))
 
-        # ── Summary Statistics table ──────────────────────────────────────────
-        story.append(Paragraph("Summary Statistics", SectionHdr))
+        # ── Table 2 — ANOVA Summary ───────────────────────────────────────────
+        story.append(Paragraph(
+            "Table 2. " + r.get("anova_table_title", "Analysis of Variance Summary"), SecHdr))
         t2_data = [
-            ["Statistic",                     "Value"],
-            ["Number of Items",               str(r.get("n_items", "—"))],
-            ["Number of Respondents",         str(r.get("n_respondents", "—"))],
-            ["Average Inter-item Corr.",      _fmt(r.get("avg_interitem_corr"))],
-            ["Reliability Interpretation",    r.get("interpretation", "—")],
+            ["Source", "SS", "df", "MS", "F", "p"],
+            [
+                r.get("anova_between_label", "Between Groups"),
+                _fmt(r.get("SS_between")),
+                str(r.get("df_between", "")),
+                _fmt(r.get("MS_between")),
+                _fmt(r.get("F_statistic")),
+                _fmt(r.get("p_value")),
+            ],
+            [
+                r.get("anova_within_label", "Within Groups"),
+                _fmt(r.get("SS_within")),
+                str(r.get("df_within", "")),
+                _fmt(r.get("MS_within")),
+                "", "",
+            ],
+            [
+                r.get("anova_total_label", "Total"),
+                _fmt(r.get("SS_total")),
+                str(df_total),
+                "", "", "",
+            ],
         ]
-        t2 = Table(t2_data, colWidths=[2.5*inch, 2.0*inch])
-        t2.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, 0), TH_COLOR),
-            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (1, 0), (-1, -1), "CENTER"),
-            ("LINEABOVE",     (0, 0), (-1, 0), 1.2, colors.black),
-            ("LINEBELOW",     (0, 0), (-1, 0), 0.6, BORDER_CL),
-            ("LINEBELOW",     (0, -1), (-1, -1), 1.2, colors.black),
-            ("ROWBACKGROUNDS",(0, 1), (-1, -1),
-             [colors.white, colors.HexColor("#f9f9f9")]),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ]))
+        cw2 = [COL_W*0.28, COL_W*0.16, COL_W*0.10,
+               COL_W*0.16, COL_W*0.15, COL_W*0.15]
+        t2  = Table(t2_data, colWidths=cw2)
+        t2.setStyle(tbl_style())
         story.append(t2)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 5))
 
-        # ── Items list ────────────────────────────────────────────────────────
-        items = r.get("item_names", [])
-        if items:
-            story.append(Paragraph("Items", SectionHdr))
+        # ── Test Results ──────────────────────────────────────────────────────
+        story.append(Paragraph("Test Results", SecHdr))
+        if r.get("edited") and r.get("conclusion_text"):
+            decision_text = r["conclusion_text"].replace("\n", "<br/>")
+            story.append(Paragraph(decision_text, BodySt))
+        else:
+            # F and p line — larger bold values
             story.append(Paragraph(
-                ", ".join(f"{i+1}. {nm}" for i, nm in enumerate(items)), Body))
-            story.append(Spacer(1, 6))
-
-        # ── Perfect correlations note ─────────────────────────────────────────
-        if r.get("perfect_correlations"):
-            pairs = [f"{p[0]} and {p[1]}" for p in r["perfect_correlations"]]
-            note_style = ParagraphStyle("note", parent=styles["Normal"],
-                                         fontSize=8, fontName="Helvetica-Oblique")
+                f'<font size="12"><b>F</b></font>({r.get("df_between")}, {r.get("df_within")}) = '
+                f'<font size="13"><b>{_fmt(r.get("F_statistic"))}</b></font>,&nbsp;&nbsp;'
+                f'<font size="12"><b>p</b></font> = '
+                f'<font size="13"><b>{_fmt(r.get("p_value"))}</b></font>,&nbsp;&nbsp;'
+                f'&#945; = {r.get("alpha", 0.05)}',
+                ResultSt))
+            # Decision line — bold and prominent
             story.append(Paragraph(
-                f"Note. Variables {', '.join(pairs)} correlated perfectly.",
-                note_style))
-            story.append(Spacer(1, 6))
+                f'<font size="12"><b>Decision:&nbsp;</b></font>'
+                f'<font size="12"><b>{r.get("decision", "")}</b></font>',
+                ResultSt))
+            # Conclusion sentence — normal body size
+            story.append(Paragraph(r.get("conclusion", ""), BodySt))
+        story.append(Spacer(1, 5))
 
-        # Per-part timestamp
-        story.append(Paragraph(f"Saved: {r.get('saved_at', '—')}", Small))
+        # ── Post Hoc (Tukey HSD) ──────────────────────────────────────────────
+        if r.get("is_significant") and r.get("tukey"):
+            story.append(Paragraph(
+                r.get("posthoc_title", "Post Hoc Comparisons — Tukey HSD"), SecHdr))
+            tukey_text = r.get("posthoc_text", str(r["tukey"]))
+            for line in tukey_text.split("\n"):
+                if line.strip():
+                    story.append(Paragraph(line, MonoSt))
+            story.append(Spacer(1, 4))
 
-    # Final footer
-    story.append(Spacer(1, 16))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
-    story.append(Paragraph(
-        f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}  |  "
-        f"{len(parts)} part(s) total", Small))
+        # ── Raw Data Table ────────────────────────────────────────────────────
+        story.append(Paragraph(
+            r.get("rawdata_table_title", "Raw Data by Group"), SecHdr))
 
-    doc_pdf.build(story)
+        MAX_VAL = 55
+        t3_data = [["Group", "n", "Values"]]
+        if r.get("raw_data_edits"):
+            for edit in r["raw_data_edits"]:
+                vt = edit["values_text"]
+                if len(vt) > MAX_VAL:
+                    vt = vt[:MAX_VAL - 1] + "…"
+                t3_data.append([
+                    edit["group_name"],
+                    str(len(edit["values_text"].split(","))),
+                    vt,
+                ])
+        else:
+            for name, g in zip(group_names, groups):
+                vs = ", ".join(_fmt(v) for v in g)
+                if len(vs) > MAX_VAL:
+                    vs = vs[:MAX_VAL - 1] + "…"
+                t3_data.append([name, str(len(g)), vs])
+
+        cw3 = [COL_W * 0.22, COL_W * 0.08, COL_W * 0.70]
+        t3  = Table(t3_data, colWidths=cw3)
+        t3.setStyle(tbl_style())
+        story.append(t3)
+        story.append(Spacer(1, 5))
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        story.append(HRFlowable(width=COL_W, thickness=0.5,
+                                 color=colors.grey, spaceAfter=2))
+        story.append(Paragraph(
+            f"Part saved: {r.get('saved_at', '—')}  &nbsp;|&nbsp;  "
+            f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')}  "
+            f"&nbsp;|&nbsp;  Part {part_idx + 1} of {len(parts)}",
+            SmallSt,
+        ))
+
+    doc.build(story)
