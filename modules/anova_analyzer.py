@@ -21,23 +21,15 @@ from session_manager import (
 )
 
 # ─── Theme ───────────────────────────────────────────────────────────────────
+from ui_theme import (
+    BG_DEEP, BG_CARD, BG_PANEL, BG_INPUT,
+    ACCENT, ACCENT2, DANGER, WARN, SUCCESS, PURPLE,
+    TEXT_PRI, TEXT_SEC, BORDER,
+)
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 plt.style.use('dark_background')
-
-BG_DEEP   = "#0d1117"
-BG_CARD   = "#161b22"
-BG_PANEL  = "#1c2230"
-BG_INPUT  = "#1e2736"
-ACCENT    = "#00c9a7"
-ACCENT2   = "#4e9eff"
-DANGER    = "#ef4444"
-WARN      = "#f59e0b"
-SUCCESS   = "#22c55e"
-PURPLE    = "#a855f7"
-TEXT_PRI  = "#e6edf3"
-TEXT_SEC  = "#8b949e"
-BORDER    = "#30363d"
 
 FONT_HEAD = ("Segoe UI", 22, "bold")
 FONT_SUB  = ("Segoe UI", 11)

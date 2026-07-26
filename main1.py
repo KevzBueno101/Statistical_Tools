@@ -41,42 +41,7 @@ except ImportError:
     DATABASE_AVAILABLE = False
     print("⚠️ Warning: Database module not found. History features will be disabled.")
 
-
-# Global theme manager
-class ThemeManager:
-    """Global theme manager that all modules will use"""
-    _instance = None
-    _current_mode = "dark"
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(ThemeManager, cls).__new__(cls)
-        return cls._instance
-    
-    @classmethod
-    def set_theme(cls, mode):
-        """Set theme globally for all windows"""
-        cls._current_mode = mode
-        ctk.set_appearance_mode(mode)
-    
-    @classmethod
-    def get_theme(cls):
-        """Get current theme"""
-        return cls._current_mode
-    
-    @classmethod
-    def toggle_theme(cls):
-        """Toggle between dark and light mode"""
-        if cls._current_mode == "dark":
-            cls.set_theme("light")
-            return "light"
-        else:
-            cls.set_theme("dark")
-            return "dark"
-
-
 # Initialize theme
-theme_manager = ThemeManager()
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -339,108 +304,13 @@ class MainMenuApp(ctk.CTk):
             hover_color="#2e7d32"
         ).pack(side="left", padx=5)
         
-    def create_module_card(self, parent, module, row, col):
-        """Create a styled card for each analysis module in grid layout"""
-        
-        # Card frame with hover effects
-        card = ctk.CTkFrame(
-            parent,
-            fg_color="#2b2b2b",
-            corner_radius=12,
-            cursor="hand2"
-        )
-        card.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
-        
-        # Make card height consistent
-        card.grid_propagate(False)
-        card.configure(height=180)
-        
-        # Color accent bar at top
-        accent_bar = ctk.CTkFrame(
-            card,
-            fg_color=module["color"],
-            height=4,
-            corner_radius=0
-        )
-        accent_bar.pack(fill="x", side="top")
-        
-        # Icon (large and centered)
-        icon_label = ctk.CTkLabel(
-            card,
-            text=module["icon"],
-            font=ctk.CTkFont(size=48),
-            fg_color="transparent"
-        )
-        icon_label.pack(pady=(20, 5))
-        
-        # Module name (main title)
-        name_label = ctk.CTkLabel(
-            card,
-            text=module["name"],
-            font=ctk.CTkFont(size=16, weight="bold"),
-            fg_color="transparent"
-        )
-        name_label.pack(pady=(0, 2))
-        
-        # Full name (smaller, subtle)
-        if module["name"] != module["full_name"]:
-            full_name_label = ctk.CTkLabel(
-                card,
-                text=module["full_name"],
-                font=ctk.CTkFont(size=10),
-                text_color="gray",
-                fg_color="transparent"
-            )
-            full_name_label.pack(pady=(0, 5))
-        
-        # Description
-        desc_label = ctk.CTkLabel(
-            card,
-            text=module["description"],
-            font=ctk.CTkFont(size=10),
-            text_color="#b0b0b0",
-            fg_color="transparent",
-            wraplength=200
-        )
-        desc_label.pack(pady=(0, 15))
-        
-        # Hover effects
-        def on_enter(event):
-            card.configure(fg_color="#3a3a3a")
-            accent_bar.configure(height=6)
-        
-        def on_leave(event):
-            card.configure(fg_color="#2b2b2b")
-            accent_bar.configure(height=4)
-        
-        def on_click(event):
-            # Visual feedback
-            card.configure(fg_color="#4a4a4a")
-            self.after(100, lambda: card.configure(fg_color="#3a3a3a"))
-            # Execute command
-            module["command"]()
-        
-        # Bind events to all elements
-        for widget in [card, accent_bar, icon_label, name_label, desc_label]:
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-            widget.bind("<Button-1>", on_click)
-            if hasattr(widget, 'configure'):
-                try:
-                    widget.configure(cursor="hand2")
-                except:
-                    pass
-        
-        # Bind to full name label if it exists
-        if module["name"] != module["full_name"]:
-            full_name_label.bind("<Enter>", on_enter)
-            full_name_label.bind("<Leave>", on_leave)
-            full_name_label.bind("<Button-1>", on_click)
-            try:
-                full_name_label.configure(cursor="hand2")
-            except:
-                pass
-    
+    def _launch(self, app):
+        """Ensure the module window appears on top of the main window."""
+        app.lift()
+        app.focus_force()
+        app.attributes('-topmost', True)
+        app.after(200, lambda: app.attributes('-topmost', False))
+
     # ========================================================================
     # MODULE LAUNCHERS (with database integration hooks)
     # ========================================================================
@@ -551,9 +421,9 @@ Version: 2.0.0 (Database Integrated)
         """Launch ANOVA Analyzer"""
         try:
             app = anova_analyzer.ANOVAAnalyzer()
-            # Pass database save function
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch ANOVA Analyzer:\n{str(e)}")
@@ -564,6 +434,7 @@ Version: 2.0.0 (Database Integrated)
             app = cronbach_alpha.CronbachAlphaApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Cronbach's Alpha:\n{str(e)}")
@@ -574,6 +445,7 @@ Version: 2.0.0 (Database Integrated)
             app = ttest_analyzer.TTestApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch t-test Analyzer:\n{str(e)}")
@@ -584,6 +456,7 @@ Version: 2.0.0 (Database Integrated)
             app = spearman_correlation.SpearmanAnalyzer()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Spearman's Correlation:\n{str(e)}")
@@ -594,6 +467,7 @@ Version: 2.0.0 (Database Integrated)
             app = cohen_kappa.KappaApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.run()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Cohen's Kappa:\n{str(e)}")
@@ -604,6 +478,7 @@ Version: 2.0.0 (Database Integrated)
             app = chi_square_test.ChiSquareTestApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Chi-Square Test:\n{str(e)}")
@@ -614,6 +489,7 @@ Version: 2.0.0 (Database Integrated)
             app = regression_analysis.RegressionApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Regression Analysis:\n{str(e)}")
@@ -624,6 +500,7 @@ Version: 2.0.0 (Database Integrated)
             app = pearson_r_module.PearsonRApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Pearson R module:\n{str(e)}")
@@ -634,6 +511,7 @@ Version: 2.0.0 (Database Integrated)
             app = tally_module.TallyApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch Tally module:\n{str(e)}")
@@ -644,6 +522,7 @@ Version: 2.0.0 (Database Integrated)
             app = kr20_reliability_app.KR20ReliabilityApp()
             if DATABASE_AVAILABLE:
                 app.db_save_function = self.save_analysis_to_db
+            self._launch(app)
             app.mainloop()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch KR-20 module:\n{str(e)}")
@@ -725,20 +604,12 @@ Version: 2.0.0 (Database Integrated)
     
     def toggle_theme(self):
         """Toggle between dark and light mode"""
-        new_theme = theme_manager.toggle_theme()
-        
-        if new_theme == "light":
+        if ctk.AppearanceModeTracker._appearance_mode == "dark":
+            ctk.set_appearance_mode("light")
             self.theme_btn.configure(text="🌙 Dark Mode")
-            messagebox.showinfo(
-                "Theme Changed", 
-                "Light mode activated!\n\nAll opened and future windows will use light mode."
-            )
         else:
+            ctk.set_appearance_mode("dark")
             self.theme_btn.configure(text="☀️ Light Mode")
-            messagebox.showinfo(
-                "Theme Changed", 
-                "Dark mode activated!\n\nAll opened and future windows will use dark mode."
-            )
 
 
 # ============================================================================

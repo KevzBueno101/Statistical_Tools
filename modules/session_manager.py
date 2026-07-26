@@ -11,19 +11,11 @@ from tkinter import messagebox
 from datetime import datetime
 
 # ── Palette (matches main app) ────────────────────────────────────────────────
-BG_DEEP   = "#0d1117"
-BG_CARD   = "#161b22"
-BG_PANEL  = "#1c2230"
-BG_INPUT  = "#1e2736"
-ACCENT    = "#00c9a7"
-ACCENT2   = "#4e9eff"
-DANGER    = "#ef4444"
-WARN      = "#f59e0b"
-SUCCESS   = "#22c55e"
-PURPLE    = "#a855f7"
-TEXT_PRI  = "#e6edf3"
-TEXT_SEC  = "#8b949e"
-BORDER    = "#30363d"
+from ui_theme import (
+    BG_DEEP, BG_CARD, BG_PANEL, BG_INPUT,
+    ACCENT, ACCENT2, DANGER, WARN, SUCCESS, PURPLE,
+    TEXT_PRI, TEXT_SEC, BORDER,
+)
 
 FONT_HEAD = ("Segoe UI", 14, "bold")
 FONT_CARD = ("Segoe UI", 12, "bold")

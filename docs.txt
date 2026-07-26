@@ -1,0 +1,628 @@
+# Statistical Analysis Suite - Database Integration Guide
+
+## 📋 Overview
+
+This document provides complete instructions for integrating SQLite database functionality into your Statistical Analysis Suite application. The database system stores analysis history, enables searching, and provides export capabilities.
+
+---
+
+## 🗂️ File Structure
+
+```
+main/
+├── modules/
+│   ├── __init__.py
+│   ├── database.py                    # ← NEW: Database module
+│   ├── anova_analyzer.py              # ← MODIFIED: Add DB integration
+│   ├── cronbach_alpha.py              # ← MODIFIED: Add DB integration
+│   ├── ttest_analyzer.py              # ← MODIFIED: Add DB integration
+│   ├── spearman_correlation.py        # ← MODIFIED: Add DB integration
+│   ├── cohen_kappa.py                 # ← MODIFIED: Add DB integration
+│   ├── chi_square_test.py             # ← MODIFIED: Add DB integration
+│   └── regression_analysis.py         # ← MODIFIED: Add DB integration
+├── main.py                            # ← MODIFIED: Add DB UI & integration
+├── stats_app.db                       # ← AUTO-CREATED: SQLite database
+└── output/
+    └── regression_reports/
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Install Database Module
+
+Copy `database.py` to your `modules/` folder:
+
+```bash
+cp database.py main/modules/
+```
+
+### 2. Replace Main Menu
+
+Replace your existing `main.py` with the new database-integrated version:
+
+```bash
+cp main.py main/
+```
+
+### 3. Run the Application
+
+```bash
+cd main/
+python main.py
+```
+
+The database will be automatically initialized on first run.
+
+---
+
+## 📦 Dependencies
+
+No additional Python packages required! The implementation uses only Python standard library:
+
+- `sqlite3` (built-in)
+- `json` (built-in)
+- `csv` (built-in)
+- `datetime` (built-in)
+
+---
+
+## 🔧 Database Module Features
+
+### Core Functions
+
+```python
+# Initialize database
+database.initialize_database("stats_app.db")
+
+# Save analysis result
+record_id = database.save_result(
+    analysis_type="ANOVA",
+    input_data={"groups": 3, "n": 30},
+    result={"F": 4.56, "p": 0.023},
+    interpretation="Significant difference found",
+    metadata={"user": "John Doe"}
+)
+
+# Retrieve all results
+all_records = database.get_all_results()
+
+# Retrieve specific result
+record = database.get_result_by_id(1)
+
+# Delete result
+database.delete_result(1)
+
+# Search by analysis type
+anova_results = database.search_by_analysis_type("ANOVA")
+
+# Export to CSV
+database.export_to_csv("history.csv")
+
+# Get database statistics
+stats = database.get_database_stats()
+```
+
+---
+
+## 🔗 Integrating Analysis Modules
+
+### Step-by-Step Integration
+
+Each analysis module needs three simple modifications:
+
+#### 1. Add Database Attribute in `__init__`
+
+```python
+class YourAnalyzer(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        
+        # ... existing initialization ...
+        
+        # ADD THIS LINE:
+        self.db_save_function = None  # Set by main.py if database available
+```
+
+#### 2. Add Save Method
+
+```python
+def save_to_database(self):
+    """Save analysis results to database"""
+    if self.db_save_function is None or self.results is None:
+        return
+    
+    try:
+        # Prepare data
+        input_data = {
+            'parameter1': self.param1,
+            'parameter2': self.param2,
+            'n': self.n
+        }
+        
+        results = {
+            'statistic': float(self.results['statistic']),
+            'p_value': float(self.results['p_value']),
+            'conclusion': self.results['conclusion']
+        }
+        
+        interpretation = "Your interpretation text here"
+        
+        metadata = {
+            'title': self.title_entry.get().strip(),
+            'date': datetime.now().isoformat()
+        }
+        
+        # Call save function
+        self.db_save_function(
+            analysis_type="Your Analysis Name",
+            input_data=input_data,
+            result=results,
+            interpretation=interpretation,
+            metadata=metadata
+        )
+        
+    except Exception as e:
+        print(f"⚠️ Warning: Could not save to database: {e}")
+```
+
+#### 3. Call Save After Analysis
+
+```python
+def run_analysis(self):
+    """Perform your statistical analysis"""
+    try:
+        # ... perform analysis ...
+        
+        self.results = {
+            'statistic': calculated_stat,
+            'p_value': calculated_p,
+            'conclusion': conclusion_text
+        }
+        
+        self.display_results()
+        
+        # ADD THIS LINE:
+        self.save_to_database()
+        
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+```
+
+---
+
+## 📊 Database Schema
+
+### `analysis_history` Table
+
+| Column          | Type      | Description                              |
+|-----------------|-----------|------------------------------------------|
+| `id`            | INTEGER   | Primary key (auto-increment)             |
+| `analysis_type` | TEXT      | Type of analysis (e.g., "ANOVA")         |
+| `input_data`    | TEXT      | JSON string of input parameters          |
+| `result`        | TEXT      | JSON string of statistical results       |
+| `interpretation`| TEXT      | Human-readable conclusion                |
+| `date_created`  | TIMESTAMP | Automatic timestamp (default: now)       |
+| `metadata`      | TEXT      | JSON string of additional info (optional)|
+
+### Indexes
+
+- `idx_analysis_type`: Fast filtering by analysis type
+- `idx_date_created`: Fast sorting by date (descending)
+
+---
+
+## 💾 Using the Database in Your App
+
+### From Main Menu
+
+1. **View History**: Click "📜 View Analysis History"
+   - Shows last 50 analyses
+   - Can delete individual records
+   - Can view detailed information
+
+2. **Search**: Click "🔍 Search Analyses"
+   - Filter by analysis type
+   - View matching results
+
+3. **Export**: Click "💾 Export to CSV"
+   - Export all or filtered results
+   - Choose save location
+
+### Automatic Saving
+
+Every time you run an analysis:
+1. Results are computed
+2. Results are displayed in the module
+3. Results are **automatically saved** to database
+4. Confirmation printed to console
+
+---
+
+## 🔍 Search & Filter Examples
+
+### Search by Analysis Type
+
+```python
+# Get all ANOVA analyses
+anova_results = database.search_by_analysis_type("ANOVA")
+
+# Get all t-tests
+ttest_results = database.search_by_analysis_type("t-test")
+```
+
+### Search by Date Range
+
+```python
+# Get analyses from January 2024
+results = database.search_by_date_range(
+    start_date="2024-01-01",
+    end_date="2024-01-31"
+)
+```
+
+### Get Available Analysis Types
+
+```python
+# Get list of all analysis types in database
+types = database.get_analysis_types()
+# Returns: ['ANOVA', 't-test', 'Cronbach\'s Alpha', ...]
+```
+
+---
+
+## 📤 Export Options
+
+### Export to CSV
+
+```python
+# Export all results
+database.export_to_csv("all_analyses.csv")
+
+# Export specific analysis type
+database.export_to_csv("anova_only.csv", analysis_type="ANOVA")
+```
+
+**CSV Format:**
+```csv
+id,analysis_type,date_created,interpretation
+1,ANOVA,2024-02-13 10:30:00,"Significant difference found"
+2,t-test,2024-02-13 11:45:00,"No significant difference"
+```
+
+### Export to JSON (Full Data)
+
+```python
+# Export complete data including input and results
+database.export_full_to_json("complete_history.json")
+```
+
+---
+
+## 📈 Database Statistics
+
+```python
+stats = database.get_database_stats()
+
+# Returns:
+{
+    'total_records': 150,
+    'by_type': {
+        'ANOVA': 45,
+        't-test': 60,
+        'Cronbach\'s Alpha': 25,
+        'Spearman Correlation': 20
+    },
+    'first_record': '2024-01-15 09:30:00',
+    'last_record': '2024-02-13 14:20:00',
+    'database_size_kb': 245.6
+}
+```
+
+---
+
+## 🛡️ Error Handling
+
+The database system includes comprehensive error handling:
+
+### Connection Errors
+- Automatic reconnection attempts
+- Graceful degradation if database unavailable
+- App continues to work without database
+
+### Data Validation
+- Parameterized queries prevent SQL injection
+- JSON validation for complex data structures
+- Type checking for numeric values
+
+### User-Friendly Messages
+```python
+✓ Database connected: stats_app.db
+✓ Database tables created successfully
+✓ Analysis saved successfully (ID: 42)
+✗ Database connection error: [details]
+⚠️ Warning: Could not save to database: [details]
+```
+
+---
+
+## 🔒 Security Features
+
+### SQL Injection Prevention
+
+All database queries use parameterized statements:
+
+```python
+# SAFE - Parameterized query
+cursor.execute(
+    "SELECT * FROM analysis_history WHERE id = ?",
+    (record_id,)
+)
+
+# UNSAFE - String concatenation (NOT USED)
+# cursor.execute(f"SELECT * FROM analysis_history WHERE id = {record_id}")
+```
+
+### Data Sanitization
+
+- JSON serialization for complex objects
+- Type conversion for numpy arrays
+- Error handling for malformed data
+
+---
+
+## 🧹 Database Maintenance
+
+### Clear All Data
+
+```python
+# CAUTION: This deletes ALL data
+database.clear_all_data(confirm=True)
+```
+
+### Backup Database
+
+```bash
+# Simple file copy
+cp stats_app.db stats_app_backup_$(date +%Y%m%d).db
+```
+
+### Check Database Integrity
+
+```bash
+sqlite3 stats_app.db "PRAGMA integrity_check;"
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: "Database module not found"
+
+**Solution:**
+```bash
+# Ensure database.py is in modules folder
+ls modules/database.py
+
+# Check __init__.py exists
+touch modules/__init__.py
+```
+
+### Issue: "Table doesn't exist"
+
+**Solution:**
+```python
+# Reinitialize database
+database.create_tables("stats_app.db")
+```
+
+### Issue: "JSON decode error"
+
+**Solution:** The module is trying to save non-serializable data.
+
+```python
+# Convert numpy types to Python types
+results = {
+    'value': float(numpy_value),  # not: numpy_value
+    'count': int(numpy_count)     # not: numpy_count
+}
+```
+
+### Issue: Database locked
+
+**Solution:** Close all connections properly:
+
+```python
+# Always close connections
+conn = database.connect_db()
+try:
+    # ... operations ...
+finally:
+    conn.close()
+```
+
+---
+
+## 📝 Complete Integration Checklist
+
+- [ ] Copy `database.py` to `modules/` folder
+- [ ] Replace `main.py` with database-integrated version
+- [ ] Add `self.db_save_function = None` to each analyzer's `__init__`
+- [ ] Create `save_to_database()` method in each analyzer
+- [ ] Call `save_to_database()` after successful analysis
+- [ ] Test each module independently
+- [ ] Test database save/retrieve functionality
+- [ ] Test search and filter features
+- [ ] Test export to CSV/JSON
+- [ ] Verify error handling works correctly
+
+---
+
+## 🎯 Best Practices
+
+### 1. Always Use Try-Except
+
+```python
+try:
+    database.save_result(...)
+except Exception as e:
+    print(f"⚠️ Warning: {e}")
+    # Don't crash - database saving is optional
+```
+
+### 2. Structure Data Properly
+
+```python
+# Good - Clean, serializable
+input_data = {
+    'n_groups': 3,
+    'n_samples': 30,
+    'alpha': 0.05
+}
+
+# Bad - Non-serializable
+input_data = {
+    'groups': [numpy_array1, numpy_array2],  # Can't serialize
+    'function': lambda x: x**2                # Can't serialize
+}
+```
+
+### 3. Keep Interpretations Concise
+
+```python
+# Good - Brief summary
+interpretation = "F(2, 27) = 4.56, p = .023. Significant difference found."
+
+# Bad - Too detailed
+interpretation = "The one-way ANOVA revealed... [5 paragraphs]"
+```
+
+### 4. Add Meaningful Metadata
+
+```python
+metadata = {
+    'user': 'John Doe',
+    'report_title': 'Q4 Performance Analysis',
+    'settings': {'alpha': 0.05, 'correction': 'bonferroni'}
+}
+```
+
+---
+
+## 🔮 Advanced Features
+
+### Custom Database Path
+
+```python
+# Use different database file
+database.initialize_database("my_custom_db.db")
+```
+
+### Context Manager Usage
+
+```python
+with database.DatabaseManager("stats_app.db") as db:
+    results = database.get_all_results()
+    # Connection automatically closed
+```
+
+### Batch Operations
+
+```python
+# Save multiple analyses efficiently
+with database.DatabaseManager() as db:
+    for analysis in analysis_batch:
+        database.save_result(
+            analysis_type=analysis.type,
+            input_data=analysis.input,
+            result=analysis.result,
+            interpretation=analysis.interpretation
+        )
+```
+
+---
+
+## 📚 Additional Resources
+
+### SQLite Documentation
+- https://www.sqlite.org/docs.html
+
+### Python sqlite3 Module
+- https://docs.python.org/3/library/sqlite3.html
+
+### JSON Best Practices
+- https://docs.python.org/3/library/json.html
+
+---
+
+## ✅ Testing Checklist
+
+After integration, verify:
+
+- [ ] Database file created on first run
+- [ ] Tables created automatically
+- [ ] Each analysis module can save results
+- [ ] History viewer shows saved analyses
+- [ ] Search functionality works
+- [ ] Export to CSV works
+- [ ] Export to JSON works
+- [ ] Delete functionality works
+- [ ] App works without database (graceful degradation)
+- [ ] No crashes from database errors
+
+---
+
+## 🎉 Success Indicators
+
+When properly integrated, you should see:
+
+```
+====================================================================
+DATABASE INITIALIZATION
+====================================================================
+✓ Database file found: stats_app.db
+✓ Database tables created successfully
+
+📊 Database Statistics:
+   Total Records: 0
+   Database Size: 8.0 KB
+
+====================================================================
+✓ Database system ready
+====================================================================
+```
+
+And after running analyses:
+
+```
+✓ Analysis saved to database (ID: 1)
+✓ ANOVA analysis saved to database (ID: 2)
+✓ t-test analysis saved to database (ID: 3)
+```
+
+---
+
+## 🆘 Support
+
+If you encounter issues:
+
+1. Check console output for error messages
+2. Verify file paths are correct
+3. Ensure Python 3.6+ is installed
+4. Check that sqlite3 module is available (built-in)
+5. Review the example integration code
+6. Test database module independently
+
+---
+
+## 📜 License
+
+This database integration system is part of the Statistical Analysis Suite.
+Free to use and modify for your needs.
+
+---
+
+**Version:** 2.0.0  
+**Last Updated:** February 2024  
+**Author:** Statistical Analysis Suite Team
